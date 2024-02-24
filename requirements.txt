@@ -1,0 +1,4 @@
+quart==0.19.4
+Requests==2.31.0
+spacy==3.7.2
+twitchio==2.8.2

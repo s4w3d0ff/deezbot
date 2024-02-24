@@ -1,0 +1,19 @@
+{
+    "client_id": "",
+    "client_secret": "",
+    "bot": {
+        "prefix": ["~", "!"],
+        "emote": "KEKW",
+        "noun": "deez nutz",
+        "delay": [5, 10],
+        "jpath": "db/jokes.json",
+        "igpath": "db/ignore.json"
+    },
+    "redirect_uri": "http://localhost:5000/callback",
+    "scopes": [
+        "chat:read",
+        "chat:edit",
+		"moderator:read:followers",
+		"channel:read:subscriptions"
+    ]
+}
