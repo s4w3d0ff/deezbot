@@ -12,8 +12,6 @@
     "redirect_uri": "http://localhost:5000/callback",
     "scopes": [
         "chat:read",
-        "chat:edit",
-		"moderator:read:followers",
-		"channel:read:subscriptions"
+        "chat:edit"
     ]
 }
