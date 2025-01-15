@@ -1,4 +1,2 @@
-quart==0.19.4
-Requests==2.31.0
+git+https://github.com/s4w3d0ff/pool-guy.git#egg=pool-guy
 spacy==3.7.2
-twitchio==2.8.2
