@@ -198,7 +198,7 @@ if __name__ == '__main__':
         datefmt="%I:%M:%S%p",
         level=logging.INFO
     )
-    cfg = loadJSON('db/cfg.json')
+    cfg = loadJSON('config.json')
     bot = DeezBot(**cfg, alert_objs={'channel.chat.message': ChannelChatMessageAlert})
     chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     webbrowser.register('chrome', None, webbrowser.BackgroundBrowser(chrome_path))
