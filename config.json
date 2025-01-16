@@ -14,8 +14,10 @@
 	"ws_config": {
             "channels": {"channel.chat.message": [null]}, 
             "queue_skip": ["channel.chat.message"], 
-            "storage_type": "json"
+            "storage_type": "fake"
     },
+	"max_retries": 30,
+	"retry_delay": 10,
 	"login_browser": "chrome",
 	"jnoun": "deez nutz",
 	"jemote": "Kappa",
