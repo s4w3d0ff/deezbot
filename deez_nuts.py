@@ -1,7 +1,7 @@
 import spacy
-from poolguy.utils import random, json, asyncio, webbrowser, time, ctxt
-from poolguy.utils import loadJSON, saveJSON, cmd_rate_limit
-from poolguy.twitch import TwitchBot, Alert, ColorLogger
+from poolguy.utils import random, json, asyncio, webbrowser, time, os
+from poolguy.utils import loadJSON, saveJSON, cmd_rate_limit, ctxt
+from poolguy.twitch import CommandBot, Alert, ColorLogger
 
 logger = ColorLogger(__name__)
 
@@ -42,9 +42,17 @@ class ChannelChatMessageAlert(Alert):
             logger.error(f"Error in process_message(): {e}")
             raise
 
-class DeezBot(TwitchBot):
+class DeezBot(CommandBot):
     def __init__(self, jnoun='butt', jemote='Kappa', jpath='db/jokes.json', 
             jdelay=[4,15], jlimit=20, igpath='db/ignore.json', loop_delay=300, *args, **kwargs):
+        # Fetch sensitive data from environment variables
+        client_id = os.getenv("DEEZ_CLIENT_ID")
+        client_secret = os.getenv("DEEZ_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise ValueError("Environment variables DEEZ_CLIENT_ID and DEEZ_CLIENT_SECRET are required")
+        kwargs['http_config']['client_id'] = client_id
+        kwargs['http_config']['client_secret'] = client_secret
+        
         super().__init__(*args, **kwargs)
         self.jnoun = jnoun
         self.jemote = jemote
@@ -58,7 +66,7 @@ class DeezBot(TwitchBot):
         self.jlimit = jlimit
         self.lastjoke = 0
 
-    @cmd_rate_limit(calls=3, period=30)
+    @cmd_rate_limit(calls=1, period=30)
     async def cmd_ignore(self, user, channel, args):
         """Adds the user calling the command to the ignore list"""
         try:
@@ -74,7 +82,7 @@ class DeezBot(TwitchBot):
         except Exception as e:
             logger.error(f"Error saving ignore list: {e}")
     
-    @cmd_rate_limit(calls=3, period=30)
+    @cmd_rate_limit(calls=1, period=30)
     async def cmd_unignore(self, user, channel, args):
         """Removes the calling user from the ignore list"""
         try:
@@ -192,7 +200,7 @@ class DeezBot(TwitchBot):
 
 if __name__ == '__main__':
     import logging
-    fmat = ctxt('%(asctime)s', 'yellow', style='d') + '-%(levelname)s-' + ctxt('[%(name)s]', 'purple', style='d') + ctxt(' %(message)s', style='d')
+    fmat = ctxt('%(asctime)s', 'yellow', style='d') + '-%(levelname)s-' + ctxt('[%(name)s]', 'purple', style='d') + ctxt(' %(message)s', 'green', style='d')
     logging.basicConfig(
         format=fmat,
         datefmt="%I:%M:%S%p",
