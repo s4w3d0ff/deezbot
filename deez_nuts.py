@@ -99,7 +99,7 @@ class DeezBot(TwitchBot):
     #===================================================================================
     async def deez_loop(self):
         logger.warning(f'deez_loop started')
-        await asyncio.sleep(5)
+        await asyncio.sleep(20)
         while self.ws.connected:
             await self.check_connections()
             await asyncio.sleep(self.loop_delay)
@@ -192,7 +192,7 @@ class DeezBot(TwitchBot):
 
 if __name__ == '__main__':
     import logging
-    fmat = ctxt('%(asctime)s', 'yellow', style='d') + '-%(levelname)s-' + ctxt('[%(name)s]', 'purple', style='d') + ' %(message)s'
+    fmat = ctxt('%(asctime)s', 'yellow', style='d') + '-%(levelname)s-' + ctxt('[%(name)s]', 'purple', style='d') + ctxt(' %(message)s', style='d')
     logging.basicConfig(
         format=fmat,
         datefmt="%I:%M:%S%p",
