@@ -1,14 +1,10 @@
 {
-	"http_creds": {
-		"client_id": "yourclientid",
-		"client_secret": "yoursecret",
+	"http_config": {
 		"redirect_uri": "http://localhost:5000/callback",
 		"scopes": [
 			"moderator:read:followers",
 			"user:read:chat",
-			"user:write:chat",
-			"chat:read",
-			"chat:edit"
+			"user:write:chat"
 		]
 	},
 	"ws_config": {
@@ -25,5 +21,8 @@
 	"jdelay": [7, 15],
 	"jlimit": 300,
 	"igpath": "db/ignore.json",
-	"loop_delay": 300
+	"loop_delay": 300,
+	"login_browser": {
+		"chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+	}
 }
