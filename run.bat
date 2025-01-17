@@ -10,5 +10,5 @@ echo Running deez_nuts.py...
 python deez_nutz.py
 
 echo Deactivating virtual environment...
-deactivate
+call deez_venv\Scripts\deactivate
 pause

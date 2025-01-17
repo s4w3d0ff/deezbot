@@ -15,7 +15,7 @@ echo Installing spaCy model...
 python -m spacy download en_core_web_sm
 
 echo Deactivating virtual environment...
-deactivate
+call deez_venv\Scripts\deactivate
 
 echo Installation complete!
 pause
