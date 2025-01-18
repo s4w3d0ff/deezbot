@@ -30,11 +30,8 @@ class ChannelChatMessageAlert(Alert):
         c = await self.bot.command_check(text, user, channel)
         if c:
             return
-        if user["username"].lower() in self.bot.ignoreList:
-            logger.debug(f"Ignored message from {user['username']}")
-            return
         try:
-            r = await self.bot.makeJoke(text)
+            r = await self.bot.makeJoke(text, user)
             if r:
                 await self.bot.http.sendChatMessage(r, broadcaster_id=channel["broadcaster_id"])
                 logger.debug(f'Sent message response: {r}')
@@ -125,7 +122,7 @@ class DeezBot(CommandBot):
         return conn_chats
     
     async def live_follower_ids(self):
-        data = await self.http.getChannelFollowers(first=100)
+        data = await self.http.getChannelFollowers()
         return await self.http.getStreams(user_id=[i['user_id'] for i in data], type='live')
     
     async def check_connections(self):
@@ -182,7 +179,10 @@ class DeezBot(CommandBot):
         logger.debug(f"[replace_random_noun_chunk] {text} -> {out}")
         return out
     
-    async def makeJoke(self, m):
+    async def makeJoke(self, m, user):
+        if user["username"].lower() in self.ignoreList:
+            logger.debug(f"Ignored message from {user['username']}")
+            return
         self.jcount += 1
         # keep from spamming jokes if keywords are being used
         if time.time() - self.lastjoke >= self.jlimit:
