@@ -11,4 +11,5 @@ python deez_nutz.py
 
 echo Deactivating virtual environment...
 call deez_venv\Scripts\deactivate
+
 pause
