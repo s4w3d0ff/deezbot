@@ -14,7 +14,6 @@
     },
 	"max_retries": 30,
 	"retry_delay": 10,
-	"login_browser": "chrome",
 	"jnoun": "deez nutz",
 	"jemote": "Kappa",
 	"jpath": "db/jokes.json",
