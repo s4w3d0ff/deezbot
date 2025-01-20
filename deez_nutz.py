@@ -33,15 +33,15 @@ class ChannelChatMessageAlert(Alert):
         try:
             r = await self.bot.makeJoke(text, user)
             if r:
-                await self.bot.http.sendChatMessage(r, broadcaster_id=channel["broadcaster_id"])
-                logger.debug(f'Sent message response: {r}')
+                m = await self.bot.send_chat(r, channel["broadcaster_id"])
+                logger.debug(f'Sent message response: {r} {m}')
         except Exception as e:
             logger.error(f"Error in process_message(): {e}")
             raise
 
 class DeezBot(CommandBot):
     def __init__(self, jnoun='butt', jemote='Kappa', jpath='db/jokes.json', 
-            jdelay=[4,15], jlimit=20, igpath='db/ignore.json', loop_delay=300, *args, **kwargs):
+            jdelay=[4,15], jlimit=20, igpath='db/ignore.json', loop_delay=300, always_connect=[], *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
         client_secret = os.getenv("DEEZ_CLIENT_SECRET")
@@ -59,9 +59,16 @@ class DeezBot(CommandBot):
         self.igpath = igpath
         self.jokes = loadJSON(jpath)
         self.ignoreList = set(loadJSON(self.igpath))
+        self.always_connect = always_connect
         self.loop_delay = loop_delay
         self.jlimit = jlimit
         self.lastjoke = 0
+
+    async def send_chat(self, message, channel_id=None):
+        r = await self.http.sendChatMessage(message, channel_id)
+        if not r['is_sent']:
+            logger.error(f"Message not sent! Reason: {r['drop_reason']}")
+        return r
 
     @cmd_rate_limit(calls=1, period=30)
     async def cmd_ignore(self, user, channel, args):
@@ -71,9 +78,9 @@ class DeezBot(CommandBot):
             if not target_user in self.ignoreList:
                 self.ignoreList.add(target_user)
                 saveJSON(list(self.ignoreList), self.igpath)
-                await self.http.sendChatMessage(
+                r = await self.send_chat(
                         f"You will be ignored, @{user['username']}", 
-                        broadcaster_id=channel["broadcaster_id"]
+                        channel["broadcaster_id"]
                     )
                 logger.info(f"Added {target_user} to ignore list")
         except Exception as e:
@@ -87,9 +94,9 @@ class DeezBot(CommandBot):
             if target_user in self.ignoreList:
                 self.ignoreList.remove(target_user)
                 saveJSON(list(self.ignoreList), self.igpath)
-                await self.http.sendChatMessage(
+                r = await self.send_chat(
                         f"I am listening to you again, @{user['username']}", 
-                        broadcaster_id=channel["broadcaster_id"]
+                        channel["broadcaster_id"]
                     )
                 logger.info(f"Removed {target_user} from ignore list")
         except Exception as e:
@@ -112,6 +119,7 @@ class DeezBot(CommandBot):
 
     async def after_login(self):
         await self.add_task(self.deez_loop)
+        self.always_connect.append(str(self.http.user_id))
 
     async def connected_channels(self):
         r = await self.http.getEventSubs(status='enabled')
@@ -134,8 +142,8 @@ class DeezBot(CommandBot):
         # Extract just the user_ids from the follower data if it's a list of dicts
         if follower_list and isinstance(follower_list[0], dict):
             follower_list = [str(follower['user_id']) for follower in follower_list]
-        # Add the bot's own user_id to the set
-        live_followers = set(follower_list + [str(self.http.user_id)])
+        # Add the bot's own user_id and others to the set
+        live_followers = set(follower_list + self.always_connect)
         # Calculate differences
         cs_diff = list(connected_ids - live_followers)
         # disconnect from those that unfollowed or offline
