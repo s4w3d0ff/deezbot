@@ -40,8 +40,7 @@ class ChannelChatMessageAlert(Alert):
             raise
 
 class DeezBot(CommandBot):
-    def __init__(self, jnoun='butt', jemote='Kappa', jpath='db/jokes.json', 
-            jdelay=[4,15], jlimit=20, igpath='db/ignore.json', loop_delay=300, always_connect=[], *args, **kwargs):
+    def __init__(self, jnoun='butt', jemote='Kappa', jpath='db/jokes.json', jdelay=[4,15], jlimit=20, igpath='db/ignore.json', loop_delay=300, always_connect=[], *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
         client_secret = os.getenv("DEEZ_CLIENT_SECRET")
@@ -66,6 +65,8 @@ class DeezBot(CommandBot):
 
     async def send_chat(self, message, channel_id=None):
         r = await self.http.sendChatMessage(message, channel_id)
+        r = r[0]
+        logger.info(f'{r}')
         if not r['is_sent']:
             logger.error(f"Message not sent! Reason: {r['drop_reason']}")
         return r
@@ -101,11 +102,6 @@ class DeezBot(CommandBot):
                 logger.info(f"Removed {target_user} from ignore list")
         except Exception as e:
             logger.error(f"Error saving ignore list: {e}")
-            
-    def register_routes(self):
-        @self.app.route('/')
-        async def index():
-            return "DEEZ NUTZ"
 
     #===================================================================================
     #===================================================================================
@@ -155,7 +151,7 @@ class DeezBot(CommandBot):
                 r = await self.http.deleteEventSub(connnected_channels[i]['id'])
                 if not r:
                     logger.error(f"Couldn't unsub from {connnected_channels[i]}")
-            logger.warning(f'Parted channels: \n{json.dumps(cs_diff)}')
+            logger.warning(f'Parted channels: {json.dumps(cs_diff)}')
         
         fs_diff = list(live_followers - connected_ids)
         # connect to the channels we arent already connected to
@@ -165,7 +161,7 @@ class DeezBot(CommandBot):
                     r = await self.http.createEventSub('channel.chat.message', self.ws.session_id, i)
                 except Exception as e:
                     logger.error(f"Couldn't connect to {i}: {str(e)}")
-            logger.warning(f'Joined channels: \n{json.dumps(fs_diff)}')
+            logger.warning(f'Joined channels: {json.dumps(fs_diff)}')
 
     def resetjcount(self):
         self.lastjoke = time.time()
