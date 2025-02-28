@@ -1,39 +1,33 @@
 import spacy
-from poolguy.utils import random, json, asyncio, webbrowser, time, os
-from poolguy.utils import loadJSON, saveJSON, cmd_rate_limit, ctxt
-from poolguy.twitch import CommandBot, Alert, ColorLogger
+import random
+import json
+import asyncio
+import webbrowser
+import time
+import os
+from poolguy.utils import loadJSON, saveJSON, ctxt
+from poolguy import CommandBot, Alert, ColorLogger, rate_limit, command
 
 logger = ColorLogger(__name__)
 
 nlp = spacy.load("en_core_web_sm")
 
 class ChannelChatMessageAlert(Alert):
+    store = False
+    queue_skip = True
     """channel.chat.message"""
     async def process(self):
         logger.debug(f'{self.data}')
         text = self.data["message"]["text"]
-        user = {
-            "user_id": self.data["chatter_user_id"], 
-            "username": self.data["chatter_user_name"]
-            }
-        channel = {
-            "broadcaster_id": self.data["broadcaster_user_id"],
-            "broadcaster_user_name": self.data["broadcaster_user_name"]
-            }
-        logger.info(f'[Chat] {user["username"]}: {text}', 'purple')
-        if str(user["user_id"]) == str(self.bot.http.user_id):
-            logger.debug(f'Own message ignored')
-            return
-        if self.data["source_broadcaster_user_id"]:
-            logger.debug(f'Shared chat message ignored')
-            return
-        c = await self.bot.command_check(text, user, channel)
-        if c:
+        logger.info(f'[Chat] {self.data["chatter_user_name"]}: {text}', 'purple')
+        r = await self.bot.command_check(self.data)
+        if r:
+            # it was a command, dont make a joke
             return
         try:
-            r = await self.bot.makeJoke(text, user)
+            r = await self.bot.makeJoke(text, self.data["chatter_user_name"])
             if r:
-                m = await self.bot.send_chat(r, channel["broadcaster_id"])
+                m = await self.bot.send_chat(r, self.data["broadcaster_user_id"])
                 logger.debug(f'Sent message response: {r} {m}')
         except Exception as e:
             logger.error(f"Error in process_message(): {e}")
@@ -46,8 +40,8 @@ class DeezBot(CommandBot):
         client_secret = os.getenv("DEEZ_CLIENT_SECRET")
         if not client_id or not client_secret:
             raise ValueError("Environment variables DEEZ_CLIENT_ID and DEEZ_CLIENT_SECRET are required")
-        kwargs['http_config']['client_id'] = client_id
-        kwargs['http_config']['client_secret'] = client_secret
+        kwargs['client_id'] = client_id
+        kwargs['client_secret'] = client_secret
         
         super().__init__(*args, **kwargs)
         self.jnoun = jnoun
@@ -70,8 +64,9 @@ class DeezBot(CommandBot):
         if not r['is_sent']:
             logger.error(f"Message not sent! Reason: {r['drop_reason']}")
         return r
-
-    @cmd_rate_limit(calls=1, period=30)
+        
+    @command
+    @rate_limit(calls=1, period=30)
     async def cmd_ignore(self, user, channel, args):
         """Adds the user calling the command to the ignore list"""
         try:
@@ -86,8 +81,9 @@ class DeezBot(CommandBot):
                 logger.info(f"Added {target_user} to ignore list")
         except Exception as e:
             logger.error(f"Error saving ignore list: {e}")
-    
-    @cmd_rate_limit(calls=1, period=30)
+            
+    @command
+    @rate_limit(calls=1, period=30)
     async def cmd_unignore(self, user, channel, args):
         """Removes the calling user from the ignore list"""
         try:
@@ -108,7 +104,7 @@ class DeezBot(CommandBot):
     async def deez_loop(self):
         logger.warning(f'deez_loop started')
         await asyncio.sleep(20)
-        while self.ws.connected:
+        while self.ws._running:
             await self.check_connections()
             await asyncio.sleep(self.loop_delay)
         logger.warning(f'deez_loop stopped')
@@ -158,7 +154,7 @@ class DeezBot(CommandBot):
         if fs_diff:
             for i in fs_diff:
                 try:
-                    r = await self.http.createEventSub('channel.chat.message', self.ws.session_id, i)
+                    r = await self.ws.create_event_sub('channel.chat.message', i)
                 except Exception as e:
                     logger.error(f"Couldn't connect to {i}: {str(e)}")
             logger.warning(f'Joined channels: {json.dumps(fs_diff)}')
@@ -184,8 +180,8 @@ class DeezBot(CommandBot):
         return out
     
     async def makeJoke(self, m, user):
-        if user["username"].lower() in self.ignoreList:
-            logger.debug(f"Ignored message from {user['username']}")
+        if user.lower() in self.ignoreList:
+            logger.debug(f"Ignored message from {user}")
             return
         self.jcount += 1
         # keep from spamming jokes if keywords are being used
