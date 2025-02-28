@@ -1,27 +1,21 @@
 {
-	"http_config": {
-		"redirect_uri": "http://localhost:5000/callback",
-		"scopes": [
-			"moderator:read:followers",
-			"user:read:chat",
-			"user:write:chat"
-		]
-	},
-	"ws_config": {
-            "channels": {"channel.chat.message": [null]}, 
-            "queue_skip": ["channel.chat.message"], 
-            "storage_type": "fake"
-    },
+	"redirect_uri": "http://localhost:5000/callback",
+	"scopes": [
+		"moderator:read:followers",
+		"user:read:chat",
+		"user:write:chat"
+	],
+	"channels": {"channel.chat.message": null},
+	"storage": "json",
 	"max_retries": 30,
 	"retry_delay": 10,
+	"browser": {"chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"},
 	"jnoun": "deez nutz",
 	"jemote": "Kappa",
 	"jpath": "db/jokes.json",
-	"jdelay": [7, 15],
-	"jlimit": 300,
+	"jdelay": [10, 20],
+	"jlimit": 600,
 	"igpath": "db/ignore.json",
 	"loop_delay": 300,
-	"login_browser": {
-		"chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-	}
+	"always_connect": ["108284496"]
 }
