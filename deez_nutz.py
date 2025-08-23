@@ -1,40 +1,54 @@
 import spacy
 import random
-import json
 import asyncio
-import webbrowser
+import logging
 import time
 import os
-from poolguy.utils import loadJSON, saveJSON, ctxt
-from poolguy import CommandBot, Alert, ColorLogger, rate_limit, command
+from poolguy.storage import loadJSON
+from poolguy import CommandBot, Alert, rate_limit, command
 
-logger = ColorLogger(__name__)
+logger = logging.getLogger(__name__)
 
 nlp = spacy.load("en_core_web_sm")
+
+def replace_random_noun_chunk(text, replacement="these walnuts"):
+    """Uses spacy to find all noun 'chunks' <text>. Then replaces a random noun chunk with the <replacement>. Returns result as string"""
+    doc = nlp(text)
+    noun_chunks = list(doc.noun_chunks)
+    if not noun_chunks:
+        out = None
+    else:
+        to_replace = random.choice(noun_chunks)
+        start = to_replace.start_char
+        end = to_replace.end_char
+        out = text[:start] + replacement + text[end:]
+        if out.strip() == replacement.strip():
+            out = None
+    logger.debug(f"[replace_random_noun_chunk] {text} -> {out}")
+    return out
 
 class ChannelChatMessageAlert(Alert):
     store = False
     queue_skip = True
     """channel.chat.message"""
     async def process(self):
-        logger.debug(f'{self.data}')
-        text = self.data["message"]["text"]
-        logger.info(f'[Chat] {self.data["chatter_user_name"]}: {text}', 'purple')
-        r = await self.bot.command_check(self.data)
-        if r:
-            # it was a command, dont make a joke
+        if int(self.bot.http.user_id) == int(self.data["chatter_user_id"]):
+            return
+        if await self.bot.command_check(self.data):
+            return
+        if await self.bot._get_ignore_status(self.data["chatter_user_id"]):
             return
         try:
-            r = await self.bot.makeJoke(text, self.data["chatter_user_name"])
+            r = await self.bot.makeJoke(self.data)
             if r:
                 m = await self.bot.send_chat(r, self.data["broadcaster_user_id"])
-                logger.debug(f'Sent message response: {r} {m}')
-        except Exception as e:
-            logger.error(f"Error in process_message(): {e}")
+                logger.info(f'{self.data["broadcaster_user_login"]}: {r} {m}')
+        except:
+            logger.exception(f"Error in process_message():\n")
             raise
 
 class DeezBot(CommandBot):
-    def __init__(self, jnoun='butt', jemote='Kappa', jpath='db/jokes.json', jdelay=[4,15], jlimit=20, igpath='db/ignore.json', loop_delay=300, always_connect=[], *args, **kwargs):
+    def __init__(self, jdelay=[4,15], jlimit=20, loop_delay=300, *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
         client_secret = os.getenv("DEEZ_CLIENT_SECRET")
@@ -42,171 +56,206 @@ class DeezBot(CommandBot):
             raise ValueError("Environment variables DEEZ_CLIENT_ID and DEEZ_CLIENT_SECRET are required")
         kwargs['client_id'] = client_id
         kwargs['client_secret'] = client_secret
-        
         super().__init__(*args, **kwargs)
-        self.jnoun = jnoun
-        self.jemote = jemote
         self.jdelay = jdelay
         self.jcount = 0
         self.jcountmax = random.randint(*self.jdelay)
-        self.igpath = igpath
-        self.jokes = loadJSON(jpath)
-        self.ignoreList = set(loadJSON(self.igpath))
-        self.always_connect = always_connect
         self.loop_delay = loop_delay
         self.jlimit = jlimit
         self.lastjoke = 0
 
-    async def send_chat(self, message, channel_id=None):
-        r = await self.http.sendChatMessage(message, channel_id)
-        r = r[0]
-        logger.info(f'{r}')
-        if not r['is_sent']:
-            logger.error(f"Message not sent! Reason: {r['drop_reason']}")
-        return r
-        
-    @command
-    @rate_limit(calls=1, period=30)
+    def _resetjcount(self):
+        self.lastjoke = 0
+        self.jcount = 0
+        self.jcountmax = random.randint(*self.jdelay)
+
+    async def get_jemote(self, u_id):
+        chans = await self._get_channel_list()
+        if u_id in chans:
+           return chans[u_id]["jemote"]
+        return "Kappa"
+
+    async def makeJoke(self, data):
+        message = data['message']['text']
+        u_id = data["broadcaster_user_id"]
+        self.jcount += 1
+        # keep from spamming jokes if keywords are being used
+        jokes = await self._get_jokes()
+        if time.time() - self.lastjoke >= self.jlimit:
+            emote = await self.get_jemote(u_id)
+            for key, joke in jokes.items():
+                if key in message.lower():
+                    self._resetjcount()
+                    return f"{joke}! {emote}"
+        # make random joke
+        if self.jcount >= self.jcountmax:
+            emote = await self.get_jemote(u_id)
+            r = replace_random_noun_chunk(message, "deez nutz")
+            if r:
+                self._resetjcount()
+                return f"{r} {emote}"
+
+    async def _update_user_ignore(self, user_id, ignore):
+        await self.storage.insert("ignore", {"user_id": user_id, "ignore": ignore})
+    
+    async def _get_ignore_status(self, user_id):
+        r = await self.storage.query("ignore", where="user_id = ?", params=(user_id,))
+        try:
+            return r[0]["ignore"]
+        except:
+            return False
+
+    async def _update_channel_list(self, user_id, config={}):
+        if config == False:
+            await self.storage.delete("channels", where="user_id = ?", params=(user_id,))
+        else:
+            await self.storage.insert("channels", {"user_id": user_id, **config})
+
+    async def _get_channel_list(self):
+        r = await self.storage.query("channels")
+        return {row["user_id"]: row for row in r}
+    
+    async def _get_jokes(self):
+        r = await self.storage.query("joke")
+        return {row["keyword"]: row["joke"] for row in r}
+    
+    def _is_channel_owner(self, user, channel):
+        return int(channel["broadcaster_id"]) == int(user["user_id"])
+    
+    def _is_own_channel(self, user, channel):
+        return int(channel["broadcaster_id"]) == int(self.http.user_id)
+
+    @command(name="jemote")
+    @rate_limit(calls=1, period=15)
+    async def cmd_jemote(self, user, channel, args):
+        """ Changes the jemote for the channel or user calling the command """
+        if self._is_channel_owner(user, channel) or self._is_own_channel(user, channel):
+            emote = args[0]
+            try:
+                await self._update_channel_list(user["user_id"], config={"jemote": emote})
+                await self.send_chat(
+                        f"{emote} I like it @{user['username']}", 
+                        channel["broadcaster_id"]
+                    )
+                logger.info(f"Changed {user["username"]} emote: {emote}")
+            except:
+                logger.exception(f"\n")
+
+    @command(name="join")
+    @rate_limit(calls=1, period=15)
+    async def cmd_join(self, user, channel, args):
+        """ Adds the user calling the command to the channel list """
+        if self._is_own_channel(user, channel):
+            try:
+                await self._update_channel_list(user["user_id"], config={
+                        "jemote": "Kappa"
+                    })
+                await self.send_chat(
+                        f":3 @{user['username']}", 
+                        channel["broadcaster_id"]
+                    )
+                logger.info(f"Joining channel: {user["user_id"]}({user["username"]})")
+            except:
+                logger.exception(f"\n")
+
+    @command(name="leave")
+    @rate_limit(calls=1, period=15)
+    async def cmd_leave(self, user, channel, args):
+        """ Removes the bot from the channel if the channel owner calls the command """
+        if self._is_channel_owner(user, channel) or self._is_own_channel(user, channel):
+            try:
+                await self._update_channel_list(user["user_id"], config=False)
+                await self.send_chat(
+                        f"PeaceOut @{user['username']}", 
+                        channel["broadcaster_id"]
+                    )
+                logger.info(f"Leaving channel: {user["user_id"]}({user["username"]})")
+            except:
+                logger.exception(f"\n")
+
+    @command(name="ignore")
+    @rate_limit(calls=1, period=15)
     async def cmd_ignore(self, user, channel, args):
-        """Adds the user calling the command to the ignore list"""
+        """ Adds the user calling the command to the ignore list """
         try:
-            target_user = user["username"].lower()
-            if not target_user in self.ignoreList:
-                self.ignoreList.add(target_user)
-                saveJSON(list(self.ignoreList), self.igpath)
-                r = await self.send_chat(
-                        f"You will be ignored, @{user['username']}", 
-                        channel["broadcaster_id"]
-                    )
-                logger.info(f"Added {target_user} to ignore list")
-        except Exception as e:
-            logger.error(f"Error saving ignore list: {e}")
-            
-    @command
-    @rate_limit(calls=1, period=30)
+            await self._update_user_ignore(user["user_id"], True)
+            await self.send_chat(
+                    f"I'm notListening to you @{user['username']}", 
+                    channel["broadcaster_id"]
+                )
+            logger.info(f"Added {user["user_id"]}({user["username"]}) to ignore list")
+        except:
+            logger.exception(f"\n")
+
+    @command(name="unignore")
+    @rate_limit(calls=1, period=15)
     async def cmd_unignore(self, user, channel, args):
-        """Removes the calling user from the ignore list"""
+        """ Removes the calling user from the ignore list """
         try:
-            target_user = user["username"].lower()
-            if target_user in self.ignoreList:
-                self.ignoreList.remove(target_user)
-                saveJSON(list(self.ignoreList), self.igpath)
-                r = await self.send_chat(
-                        f"I am listening to you again, @{user['username']}", 
+            await self._update_user_ignore(user["user_id"], False)
+            await self.send_chat(
+                        f"I'm Listening to you @{user['username']}", 
                         channel["broadcaster_id"]
                     )
-                logger.info(f"Removed {target_user} from ignore list")
-        except Exception as e:
-            logger.error(f"Error saving ignore list: {e}")
+            logger.info(f"Removed {user["user_id"]}({user['username']}) from ignore list")
+        except:
+            logger.exception(f"\n")
 
     #===================================================================================
     #===================================================================================
+    async def after_login(self):
+        await self.add_task(self.deez_loop)
+        
     async def deez_loop(self):
-        logger.warning(f'deez_loop started')
-        await asyncio.sleep(20)
-        while self.ws._running:
+        logger.debug(f'deez_loop started')
+        await asyncio.sleep(5)
+        while self.loop_delay:
             await self.check_connections()
             await asyncio.sleep(self.loop_delay)
         logger.warning(f'deez_loop stopped')
-
-    async def after_login(self):
-        await self.add_task(self.deez_loop)
-        self.always_connect.append(str(self.http.user_id))
+    #===================================================================================
+    #===================================================================================
 
     async def connected_channels(self):
         r = await self.http.getEventSubs(status='enabled')
-        conn_chats = {}
-        for i in r['data']:
-            if i["type"] == "channel.chat.message":
-                conn_chats[str(i["condition"]["broadcaster_user_id"])] = i
-        return conn_chats
-    
-    async def live_follower_ids(self):
-        data = await self.http.getChannelFollowers()
-        return await self.http.getStreams(user_id=[i['user_id'] for i in data], type='live')
+        return {str(i["condition"]["broadcaster_user_id"]): i for i in r['data']}
     
     async def check_connections(self):
         connnected_channels = await self.connected_channels()
         connected_ids = set(connnected_channels.keys())
-        logger.info(f'Connected to: {json.dumps(list(connnected_channels.keys()))}')
-        # get live followers ids
-        follower_list = await self.live_follower_ids()
-        # Extract just the user_ids from the follower data if it's a list of dicts
-        if follower_list and isinstance(follower_list[0], dict):
-            follower_list = [str(follower['user_id']) for follower in follower_list]
-        # Add the bot's own user_id and others to the set
-        live_followers = set(follower_list + self.always_connect)
-        # Calculate differences
-        cs_diff = list(connected_ids - live_followers)
-        # disconnect from those that unfollowed or offline
-        if cs_diff:
-            for i in cs_diff:
-                if i == str(self.http.user_id):
-                    # dont disconnect from self
+        logger.warning(f"Current connections:\n{connected_ids}")
+        l = await self._get_channel_list()
+        live_r = await self.http.getStreams(user_id=list(l.keys()), type='live') if l else []
+        live_list = [chan["user_id"] for chan in live_r]
+        live_list += [str(self.http.user_id)]
+        disconnect_from = list(connected_ids - set(live_list))
+        connect_to = list(set(live_list) - connected_ids)
+        if disconnect_from:
+            for chan_id in disconnect_from:
+                if chan_id == str(self.http.user_id):
                     continue
-                r = await self.http.deleteEventSub(connnected_channels[i]['id'])
+                r = await self.http.deleteEventSub(connnected_channels[chan_id]['id'])
                 if not r:
-                    logger.error(f"Couldn't unsub from {connnected_channels[i]}")
-            logger.warning(f'Parted channels: {json.dumps(cs_diff)}')
-        
-        fs_diff = list(live_followers - connected_ids)
-        # connect to the channels we arent already connected to
-        if fs_diff:
-            for i in fs_diff:
+                    logger.error(f"Couldn't disconnect from {connnected_channels[chan_id]}")
+            logger.warning(f"Disconnected from:\n{disconnect_from}")
+        if connect_to:
+            for chan_id in connect_to:
                 try:
-                    r = await self.ws.create_event_sub('channel.chat.message', i)
-                except Exception as e:
-                    logger.error(f"Couldn't connect to {i}: {str(e)}")
-            logger.warning(f'Joined channels: {json.dumps(fs_diff)}')
-
-    def resetjcount(self):
-        self.lastjoke = time.time()
-        self.jcount = 0
-        self.jcountmax = random.randint(*self.jdelay)
-    
-    def replace_random_noun_chunk(self, text, replacement="these walnuts"):
-        doc = nlp(text)
-        noun_chunks = list(doc.noun_chunks)
-        if not noun_chunks:
-            out = None
-        else:
-            to_replace = random.choice(noun_chunks)
-            start = to_replace.start_char
-            end = to_replace.end_char
-            out = text[:start] + replacement + text[end:]
-            if out.strip() == replacement.strip():
-                out = None
-        logger.debug(f"[replace_random_noun_chunk] {text} -> {out}")
-        return out
-    
-    async def makeJoke(self, m, user):
-        if user.lower() in self.ignoreList:
-            logger.debug(f"Ignored message from {user}")
-            return
-        self.jcount += 1
-        # keep from spamming jokes if keywords are being used
-        if time.time() - self.lastjoke >= self.jlimit:
-            for key in self.jokes:
-                if key in m.lower():
-                    self.resetjcount()
-                    return f"{self.jokes[key]}! {self.jemote}"
-        # make random joke
-        if self.jcount >= self.jcountmax:
-            r = self.replace_random_noun_chunk(m, self.jnoun)
-            if r:
-                self.resetjcount()
-                return f"{r}"
+                    r = await self.ws.create_event_sub('channel.chat.message', chan_id)
+                except:
+                    logger.exception(f"Couldn't connect to {chan_id}:\n")
+            logger.warning(f"Connected to:\n{connect_to}")
 
 
 if __name__ == '__main__':
-    import logging
-    fmat = ctxt('%(asctime)s', 'yellow', style='d') + '-%(levelname)s-' + ctxt('[%(name)s]', 'purple', style='d') + ctxt(' %(message)s', 'green', style='d')
+    from rich.logging import RichHandler
     logging.basicConfig(
-        format=fmat,
-        datefmt="%I:%M:%S%p",
-        level=logging.INFO
+        format='%(message)s',
+        datefmt="%X",
+        level=logging.INFO,
+        handlers=[RichHandler(rich_tracebacks=True)]
     )
     cfg = loadJSON('cfg.json')
-    bot = DeezBot(**cfg, alert_objs={'channel.chat.message': ChannelChatMessageAlert})
-    asyncio.run(bot.start())
-    
+    cfg['alert_objs'] = {'channel.chat.message': ChannelChatMessageAlert}
+    bot = DeezBot(**cfg)
+    asyncio.run(bot.start(paused=True))
