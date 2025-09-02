@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 import os
-from poolguy.storage import loadJSON
+from poolguy.core.storage import loadJSON
 from poolguy import CommandBot, Alert, rate_limit, command
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,10 @@ class DeezBot(CommandBot):
         logger.debug(f'deez_loop started')
         await asyncio.sleep(5)
         while self.loop_delay:
-            await self.check_connections()
+            try:
+                await self.check_connections()
+            except Exception as e:
+                logger.error("deez_loop Error:\n{e}")
             await asyncio.sleep(self.loop_delay)
         logger.warning(f'deez_loop stopped')
     #===================================================================================
