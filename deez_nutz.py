@@ -163,7 +163,8 @@ class DeezBot(CommandBot):
         self.lastjoke = time.time()
         self.jcount = 0
         self.jcountmax = random.randint(*self.jdelay)
-    
+
+    #why is the function using "these walnuts"? is there an encapsulated method elsewhere that converts "these walnuts" to "deez nutz"? 
     def replace_random_noun_chunk(self, text, replacement="these walnuts"):
         doc = nlp(text)
         noun_chunks = list(doc.noun_chunks)
@@ -171,6 +172,11 @@ class DeezBot(CommandBot):
             out = None
         else:
             to_replace = random.choice(noun_chunks)
+            
+            if len(noun_chunks) > 1 && noun_chunks.index(0) == doc[0:len(to_replace)]:
+                del noun_chunks[0]
+                to_replace = random.choice(noun_chunks)
+                
             start = to_replace.start_char
             end = to_replace.end_char
             out = text[:start] + replacement + text[end:]
@@ -209,4 +215,5 @@ if __name__ == '__main__':
     cfg = loadJSON('cfg.json')
     bot = DeezBot(**cfg, alert_objs={'channel.chat.message': ChannelChatMessageAlert})
     asyncio.run(bot.start())
+
     
