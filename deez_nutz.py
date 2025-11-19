@@ -244,10 +244,53 @@ class DeezBot(CommandBot):
         if connect_to:
             for chan_id in connect_to:
                 try:
-                    r = await self.ws.create_event_sub('channel.chat.message', chan_id)
-                except:
-                    logger.exception(f"Couldn't connect to {chan_id}:\n")
-            logger.warning(f"Connected to:\n{connect_to}")
+                    r = await self.ws.create_event_sub('channel.chat.message', i)
+                except Exception as e:
+                    logger.error(f"Couldn't connect to {i}: {str(e)}")
+            logger.warning(f'Joined channels: {json.dumps(fs_diff)}')
+
+    def resetjcount(self):
+        self.lastjoke = time.time()
+        self.jcount = 0
+        self.jcountmax = random.randint(*self.jdelay)
+
+    def replace_random_noun_chunk(self, text, replacement="these walnuts"):
+        doc = nlp(text)
+        noun_chunks = list(doc.noun_chunks)
+        if not noun_chunks:
+            return None
+        
+        if len(noun_chunks) > 1:
+            del noun_chunks[0]
+        
+        to_replace = random.choice(noun_chunks)
+        start = to_replace.start_char
+        end = to_replace.end_char
+        out = text[:start] + replacement + text[end:]
+        
+        if out.strip() == replacement.strip():
+            out = None
+            
+        logger.debug(f"[replace_random_noun_chunk] {text} -> {out}")
+        return out
+    
+    async def makeJoke(self, m, user):
+        if user.lower() in self.ignoreList:
+            logger.debug(f"Ignored message from {user}")
+            return
+        self.jcount += 1
+        # keep from spamming jokes if keywords are being used
+        if time.time() - self.lastjoke >= self.jlimit:
+            for key in self.jokes:
+                if key in m.lower():
+                    self.resetjcount()
+                    return f"{self.jokes[key]}! {self.jemote}"
+        # make random joke
+        if self.jcount >= self.jcountmax:
+            r = self.replace_random_noun_chunk(m, self.jnoun)
+            if r:
+                self.resetjcount()
+                return f"{r}"
 
 
 if __name__ == '__main__':
