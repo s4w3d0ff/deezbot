@@ -146,42 +146,6 @@ class DeezBot(CommandBot):
             except:
                 logger.exception(f"\n")
 
-    @command(name="fignore")
-    @rate_limit(calls=1, period=15)
-    async def cmd_fignore(self, user, channel, args):
-        """Force adds a user to the ignore list """
-        if self._is_channel_owner(user, channel) or self._is_own_channel(user, channel):
-            try:
-                name = args[0][1:] if args[0].startswith("@") else args[0]
-                u = await self.http.getUsers(logins=name)
-                userid = u[0]["id"]
-                await self._update_user_ignore(userid, True)
-                await self.send_chat(
-                        f"Added {name} to the ignore list", 
-                        channel["broadcaster_id"]
-                    )
-                logger.info(f"Added {userid}({name}) to ignore list")
-            except:
-                logger.exception(f"\n")
-
-    @command(name="funignore")
-    @rate_limit(calls=1, period=15)
-    async def cmd_funignore(self, user, channel, args):
-        """Force removes a user to the ignore list """
-        if self._is_channel_owner(user, channel) or self._is_own_channel(user, channel):
-            try:
-                name = args[0][1:] if args[0].startswith("@") else args[0]
-                u = await self.http.getUsers(logins=name)
-                userid = u[0]["id"]
-                await self._update_user_ignore(userid, True)
-                await self.send_chat(
-                        f"Removed {name} to the ignore list", 
-                        channel["broadcaster_id"]
-                    )
-                logger.info(f"Removed {userid}({name}) to ignore list")
-            except:
-                logger.exception(f"\n")
-
     @command(name="join")
     @rate_limit(calls=1, period=15)
     async def cmd_join(self, user, channel, args):
@@ -303,3 +267,4 @@ if __name__ == '__main__':
     cfg['alert_objs'] = {'channel.chat.message': ChannelChatMessageAlert}
     bot = DeezBot(**cfg)
     asyncio.run(bot.start(paused=True))
+
