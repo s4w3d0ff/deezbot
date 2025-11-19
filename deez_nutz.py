@@ -16,14 +16,19 @@ def replace_random_noun_chunk(text, replacement="these walnuts"):
     doc = nlp(text)
     noun_chunks = list(doc.noun_chunks)
     if not noun_chunks:
-        out = None
-    else:
-        to_replace = random.choice(noun_chunks)
-        start = to_replace.start_char
-        end = to_replace.end_char
-        out = text[:start] + replacement + text[end:]
-        if out.strip() == replacement.strip():
-            out = None
+        return None
+    
+    if len(noun_chunks) > 1:
+        del noun_chunks[0]
+    
+    to_replace = random.choice(noun_chunks)
+    start = to_replace.start_char
+    end = to_replace.end_char
+    out = text[:start] + replacement + text[end:]
+    
+    if out.strip() == replacement.strip():
+        return None
+        
     logger.debug(f"[replace_random_noun_chunk] {text} -> {out}")
     return out
 
@@ -141,6 +146,42 @@ class DeezBot(CommandBot):
             except:
                 logger.exception(f"\n")
 
+    @command(name="fignore")
+    @rate_limit(calls=1, period=15)
+    async def cmd_fignore(self, user, channel, args):
+        """Force adds a user to the ignore list """
+        if self._is_channel_owner(user, channel) or self._is_own_channel(user, channel):
+            try:
+                name = args[0][1:] if args[0].startswith("@") else args[0]
+                u = await self.http.getUsers(logins=name)
+                userid = u[0]["id"]
+                await self._update_user_ignore(userid, True)
+                await self.send_chat(
+                        f"Added {name} to the ignore list", 
+                        channel["broadcaster_id"]
+                    )
+                logger.info(f"Added {userid}({name}) to ignore list")
+            except:
+                logger.exception(f"\n")
+
+    @command(name="funignore")
+    @rate_limit(calls=1, period=15)
+    async def cmd_funignore(self, user, channel, args):
+        """Force removes a user to the ignore list """
+        if self._is_channel_owner(user, channel) or self._is_own_channel(user, channel):
+            try:
+                name = args[0][1:] if args[0].startswith("@") else args[0]
+                u = await self.http.getUsers(logins=name)
+                userid = u[0]["id"]
+                await self._update_user_ignore(userid, True)
+                await self.send_chat(
+                        f"Removed {name} to the ignore list", 
+                        channel["broadcaster_id"]
+                    )
+                logger.info(f"Removed {userid}({name}) to ignore list")
+            except:
+                logger.exception(f"\n")
+
     @command(name="join")
     @rate_limit(calls=1, period=15)
     async def cmd_join(self, user, channel, args):
@@ -244,53 +285,10 @@ class DeezBot(CommandBot):
         if connect_to:
             for chan_id in connect_to:
                 try:
-                    r = await self.ws.create_event_sub('channel.chat.message', i)
-                except Exception as e:
-                    logger.error(f"Couldn't connect to {i}: {str(e)}")
-            logger.warning(f'Joined channels: {json.dumps(fs_diff)}')
-
-    def resetjcount(self):
-        self.lastjoke = time.time()
-        self.jcount = 0
-        self.jcountmax = random.randint(*self.jdelay)
-
-    def replace_random_noun_chunk(self, text, replacement="these walnuts"):
-        doc = nlp(text)
-        noun_chunks = list(doc.noun_chunks)
-        if not noun_chunks:
-            return None
-        
-        if len(noun_chunks) > 1:
-            del noun_chunks[0]
-        
-        to_replace = random.choice(noun_chunks)
-        start = to_replace.start_char
-        end = to_replace.end_char
-        out = text[:start] + replacement + text[end:]
-        
-        if out.strip() == replacement.strip():
-            out = None
-            
-        logger.debug(f"[replace_random_noun_chunk] {text} -> {out}")
-        return out
-    
-    async def makeJoke(self, m, user):
-        if user.lower() in self.ignoreList:
-            logger.debug(f"Ignored message from {user}")
-            return
-        self.jcount += 1
-        # keep from spamming jokes if keywords are being used
-        if time.time() - self.lastjoke >= self.jlimit:
-            for key in self.jokes:
-                if key in m.lower():
-                    self.resetjcount()
-                    return f"{self.jokes[key]}! {self.jemote}"
-        # make random joke
-        if self.jcount >= self.jcountmax:
-            r = self.replace_random_noun_chunk(m, self.jnoun)
-            if r:
-                self.resetjcount()
-                return f"{r}"
+                    r = await self.ws.create_event_sub('channel.chat.message', chan_id)
+                except:
+                    logger.exception(f"Couldn't connect to {chan_id}:\n")
+            logger.warning(f"Connected to:\n{connect_to}")
 
 
 if __name__ == '__main__':
