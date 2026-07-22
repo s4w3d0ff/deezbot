@@ -13,5 +13,6 @@
     20
   ],
   "jlimit": 600,
-  "loop_delay": 300
+  "loop_delay": 300,
+  "browser": "firefox"
 }
