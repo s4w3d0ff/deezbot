@@ -1,13 +1,17 @@
 {
-	"redirect_uri": "http://localhost:5000/callback",
-	"scopes": [
-		"user:read:chat",
-		"user:write:chat"
-	],
-	"channels": {"channel.chat.message": null},
-	"storage": "sqlite",
-	"browser": {"librewolf": "C:\\Program Files\\LibreWolf\\librewolf.exe"},
-	"jdelay": [10, 20],
-	"jlimit": 600,
-	"loop_delay": 300
+  "redirect_uri": "http://localhost:5000/callback",
+  "scopes": [
+    "user:read:chat",
+    "user:write:chat"
+  ],
+  "channels": {
+    "channel.chat.message": null
+  },
+  "storage": "sqlite",
+  "jdelay": [
+    10,
+    20
+  ],
+  "jlimit": 600,
+  "loop_delay": 300
 }
