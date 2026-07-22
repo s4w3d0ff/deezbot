@@ -267,4 +267,3 @@ if __name__ == '__main__':
     cfg['alert_objs'] = {'channel.chat.message': ChannelChatMessageAlert}
     bot = DeezBot(**cfg)
     asyncio.run(bot.start(paused=True))
-
