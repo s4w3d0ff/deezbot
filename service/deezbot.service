@@ -1,0 +1,17 @@
+[Unit]
+Description=Twitch Deez Nutz Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=s4w3d0ff
+WorkingDirectory=/home/s4w3d0ff/Projects/deezbot
+ExecStart=/home/s4w3d0ff/Projects/deezbot/service/deezbot
+Restart=on-failure
+RestartSec=5
+
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

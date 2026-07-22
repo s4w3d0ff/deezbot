@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+else
+    echo "ERROR: .env file not found"
+    exit 1
+fi
+
+export PYTHONPATH="$SCRIPT_DIR/deez_venv/lib/python3.14/site-packages:$PYTHONPATH"
+
+exec -a deezbot "$SCRIPT_DIR/deez_venv/bin/python3" "$SCRIPT_DIR/src/deez_nutz.py"
