@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=s4w3d0ff
+WorkingDirectory=/home/s4w3d0ff/Projects/deezbot
 ExecStart=/home/s4w3d0ff/Projects/deezbot/service/deezbot
 Restart=on-failure
 RestartSec=5
