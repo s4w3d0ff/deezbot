@@ -142,7 +142,7 @@ class DeezBot(CommandBot):
                         f"{emote} I like it @{user['username']}", 
                         channel["broadcaster_id"]
                     )
-                logger.info(f"Changed {user["username"]} emote: {emote}")
+                logger.info(f'Changed {user["username"]} emote: {emote}')
             except:
                 logger.exception(f"\n")
 
@@ -159,7 +159,7 @@ class DeezBot(CommandBot):
                         f":3 @{user['username']}", 
                         channel["broadcaster_id"]
                     )
-                logger.info(f"Joining channel: {user["user_id"]}({user["username"]})")
+                logger.info(f'Joining channel: {user["user_id"]}({user["username"]})')
             except:
                 logger.exception(f"\n")
 
@@ -174,7 +174,7 @@ class DeezBot(CommandBot):
                         f"PeaceOut @{user['username']}", 
                         channel["broadcaster_id"]
                     )
-                logger.info(f"Leaving channel: {user["user_id"]}({user["username"]})")
+                logger.info(f'Leaving channel: {user["user_id"]}({user["username"]})')
             except:
                 logger.exception(f"\n")
 
@@ -188,7 +188,7 @@ class DeezBot(CommandBot):
                     f"I'm notListening to you @{user['username']}", 
                     channel["broadcaster_id"]
                 )
-            logger.info(f"Added {user["user_id"]}({user["username"]}) to ignore list")
+            logger.info(f'Added {user["user_id"]}({user["username"]}) to ignore list')
         except:
             logger.exception(f"\n")
 
