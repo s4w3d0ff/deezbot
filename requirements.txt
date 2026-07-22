@@ -1,4 +1,5 @@
 spacy
-poolguy
+poolguy @ git+https://github.com/s4w3d0ff/pool-guy.git
 aiosqlite
 rich
+click

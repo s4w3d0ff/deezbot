@@ -1,6 +1,5 @@
 *.db
 *.sqlite
-my_run*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
