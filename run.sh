@@ -17,7 +17,7 @@ else
 fi
 
 echo "Running Python app..."
-"$SCRIPT_DIR/deez_venv/bin/python" "$SCRIPT_DIR/deez_nutz.py"
+"$SCRIPT_DIR/deez_venv/bin/python" "$SCRIPT_DIR/src/deez_nutz.py"
 
 echo "Deactivating virtual environment..."
 deactivate
