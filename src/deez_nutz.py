@@ -202,7 +202,7 @@ class DeezBot(CommandBot):
                         f"I'm Listening to you @{user['username']}", 
                         channel["broadcaster_id"]
                     )
-            logger.info(f"Removed {user["user_id"]}({user['username']}) from ignore list")
+            logger.info(f"Removed {user['user_id']}({user['username']}) from ignore list")
         except:
             logger.exception(f"\n")
 
