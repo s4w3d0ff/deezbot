@@ -79,10 +79,9 @@ deezbot/
 ## Dependencies
 
 - spacy (en_core_web_sm model)
-- poolguy (Twitch bot framework)
+- poolguy (Twitch bot framework, pinned to dev branch)
 - aiosqlite (async SQLite storage)
 - rich (log formatting)
-- click (CLI utilities from poolguy)
 
 ## Notes
 
