@@ -68,9 +68,7 @@ deezbot/
 │   └── deez_nutz.py      # Bot logic (DeezBot + ChannelChatMessageAlert)
 ├── cfg.json              # Runtime configuration
 ├── db/                   # Runtime data (gitignored)
-│   ├── jokes.json        # Keyword-to-joke mappings
-│   ├── ignore.json       # Ignored user IDs
-│   └── twitch.db         # OAuth tokens and channel state
+│   └── twitch.db         # SQLite storage (tokens, jokes, channels, ignores)
 ├── .env                  # Twitch credentials (gitignored)
 ├── deez_venv/            # Virtual environment (gitignored)
 ├── install.sh / run.sh   # Linux setup/run scripts
