@@ -4,10 +4,14 @@ import asyncio
 import logging
 import time
 import os
+import re
+import aiosqlite
 from poolguy.core.storage import loadJSON
-from poolguy import CommandBot, Alert, rate_limit, command
+from poolguy import CommandBot, Alert, rate_limit, command, route
 
 logger = logging.getLogger(__name__)
+
+WRITE_TABLES = ('joke', 'ignore', 'channels')
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -62,6 +66,8 @@ class DeezBot(CommandBot):
         kwargs['client_id'] = client_id
         kwargs['client_secret'] = client_secret
         super().__init__(*args, **kwargs)
+        self.app.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.app.static_dirs = ['ui']
         self.jdelay = jdelay
         self.jcount = 0
         self.jcountmax = random.randint(*self.jdelay)
@@ -207,7 +213,119 @@ class DeezBot(CommandBot):
             logger.exception(f"\n")
 
     #===================================================================================
+    # Web UI + API ================================================================
     #===================================================================================
+    @route('/')
+    async def ui_index(self, request):
+        return await self.app.response_html(os.path.join(self.app.base_dir, 'ui', 'index.html'))
+
+    @route('/api/status')
+    async def api_status(self, request):
+        token = await self.storage.get_token('twitch') or {}
+        chans = await self._get_channel_list()
+        return self.app.response_json({
+            "authenticated": bool(self.http.user_id),
+            "user_id": str(self.http.user_id) if self.http.user_id else None,
+            "token_expires_time": token.get('expires_time'),
+            "ws_connected": self.ws._socket is not None and self.ws._session_id is not None,
+            "channels": chans,
+        })
+
+    @route('/api/test/joke', method='POST')
+    async def api_test_joke(self, request):
+        body = await request.json()
+        message = (body.get('message') or '').strip()
+        if not message:
+            return self.app.response_json({"status": False, "error": "missing 'message'"}, status=400)
+        jokes = await self._get_jokes()
+        for key, joke in jokes.items():
+            if key in message.lower():
+                emote = await self.get_jemote(self.http.user_id)
+                return self.app.response_json({"status": True, "reply": f"{joke}! {emote}", "matched_keyword": key})
+        r = replace_random_noun_chunk(message, "deez nutz")
+        if not r:
+            return self.app.response_json({"status": True, "reply": None, "matched_keyword": None})
+        emote = await self.get_jemote(self.http.user_id)
+        return self.app.response_json({"status": True, "reply": f"{r} {emote}", "matched_keyword": None})
+
+    @route('/api/test/chat', method='POST')
+    async def api_test_chat(self, request):
+        body = await request.json()
+        message = (body.get('message') or '').strip()
+        if not message:
+            return self.app.response_json({"status": False, "error": "missing 'message'"}, status=400)
+        out = ""
+        sent_chunks = 0
+        for word in message.split(" "):
+            if len(out) + len(word) > 400:
+                await self.http.sendChatMessage(out.strip())
+                sent_chunks += 1
+                out = word + " "
+            else:
+                out += word + " "
+        if len(out) > 0:
+            await self.http.sendChatMessage(out.strip())
+            sent_chunks += 1
+        logger.info(f"UI test chat sent {sent_chunks} chunk(s) to own channel")
+        return self.app.response_json({"status": True, "sent_chunks": sent_chunks})
+
+    @route('/api/db/tables')
+    async def api_db_tables(self, request):
+        tables = []
+        async with aiosqlite.connect(self.storage.db_path) as db:
+            async with db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name") as cur:
+                names = [row[0] async for row in cur]
+            for name in names:
+                clean = self.storage._clean_str(name)
+                async with db.execute(f'SELECT count(*) FROM {clean}') as cur:
+                    row = await cur.fetchone()
+                tables.append({
+                    "name": name,
+                    "row_count": row[0] if row else 0,
+                    "writable": clean in WRITE_TABLES,
+                })
+        return self.app.response_json({"status": True, "tables": tables})
+
+    @route('/api/db/table/{table}')
+    async def api_db_table(self, request):
+        table = self.storage._clean_str(request.match_info['table'])
+        limit = int(request.query.get('limit') or 200)
+        rows = await self.storage.query(table)
+        return self.app.response_json({"status": True, "table": table, "rows": rows[:limit]})
+
+    @route('/api/db/table/{table}', method='POST')
+    async def api_db_table_insert(self, request):
+        table = self.storage._clean_str(request.match_info['table'])
+        if table not in WRITE_TABLES:
+            return self.app.response_json({"status": False, "error": f"table '{table}' is read-only"}, status=403)
+        body = await request.json()
+        data = {k: str(v) for k, v in body.items()} if isinstance(body, dict) else {}
+        if not data:
+            return self.app.response_json({"status": False, "error": "empty row payload"}, status=400)
+        await self.storage.insert(table, data)
+        logger.info(f"UI db insert into {table}: {data}")
+        return self.app.response_json({"status": True, "inserted": data})
+
+    @route('/api/db/table/{table}', method='DELETE')
+    async def api_db_table_delete(self, request):
+        table = self.storage._clean_str(request.match_info['table'])
+        if table not in WRITE_TABLES:
+            return self.app.response_json({"status": False, "error": f"table '{table}' is read-only"}, status=403)
+        body = await request.json()
+        where = (body or {}).get('where')
+        params = tuple(body.get('params') or ())
+        if not where:
+            return self.app.response_json({"status": False, "error": "missing 'where' clause"}, status=400)
+        await self.storage.delete(table, where=where, params=params)
+        logger.info(f"UI db delete from {table}: {where} {params}")
+        return self.app.response_json({"status": True, "deleted_from": table})
+
+    #===================================================================================
+    #===================================================================================
+    async def before_login(self):
+        if not self.app.is_running():
+            await self.app.start()
+
     async def after_login(self):
         await self.add_task(self.deez_loop)
         
