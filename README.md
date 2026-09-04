@@ -64,17 +64,22 @@ The bot starts, authenticates via Twitch OAuth (browser flow), subscribes to Eve
 
 While the bot runs it serves a local web control panel at `http://localhost:5000` — the same port as the OAuth callback (the server stays up in steady state now, instead of stopping after login).
 
-The UI is a static dark single page (`ui/`, served at `/`) with three tabs:
+The UI is a static dark single page (`ui/`, served at `/`) with four tabs:
 
-- **Status** — auth state, token expiry countdown, websocket session indicator, channel list. Polls every 5 seconds.
+- **Status** — bot account, uptime, token expiry countdown, websocket indicator, KPI counts (connected/live channels, ignored users, jokes), per-channel table enriched with login/display name from the Twitch API (60s cache) plus live dot, viewers and stream title, and the bot's registered command list. Polls every 5 seconds.
 - **Test** — joke dry-run (runs keyword lookup + spaCy replacement without sending anything or touching joke counters) and a test chat box that sends a real message to the bot's own channel only, behind a confirm prompt.
-- **Database** — browse every table with row counts; edit cells in place on deezbot tables (`joke`, `ignore`, `channels`), per-row delete (prompts for the PK value), and a new-row form generated from existing columns. Framework tables are read-only through the API.
+- **Data** — joke keywords with inline edit/add/delete; ignore list enriched with each user's login/display name plus unignore/remove actions; channel jemote editor with leave action; raw database browser (edit cells in place on deezbot tables `joke`, `ignore`, `channels`, per-row delete, new-row form generated from existing columns). Framework tables are read-only through the API.
+- **Log** — live service log (last 1000 entries kept in-process), level filter, auto-scroll while pinned to bottom, manual refresh. Polls every 2 seconds while open.
 
 JSON endpoints behind the UI:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/status` | auth state, token expiry, ws session, channels |
+| GET | `/api/status` | bot account/username, uptime, token expiry, ws session, connected/live channel counts, ignore/joke totals |
+| GET | `/api/channels` | per-channel detail enriched with login, display name, live state, viewers, stream title (60s cache) |
+| GET | `/api/ignores` | ignore list rows enriched with user login/display name |
+| GET | `/api/commands` | registered bot commands with aliases and help text |
+| GET | `/api/logs?lines=200` | in-process log ring buffer (max 1000) tail, `oldest_seq`/`newest_seq` for incremental polling |
 | POST | `/api/test/joke` | `{message}` → keyword/spacy dry run, no side effects |
 | POST | `/api/test/chat` | `{message}` → real send to the bot's own channel, 400-char chunks |
 | GET | `/api/db/tables` | table names, row counts, writable flag |
