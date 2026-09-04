@@ -7,24 +7,33 @@ import os
 from collections import deque
 import itertools
 import aiosqlite
+import yaml
 from aiohttp import web as aweb
-from poolguy.core.storage import loadJSON
 from poolguy import CommandBot, Alert, rate_limit, command, route
 
 logger = logging.getLogger(__name__)
 
-WRITE_TABLES = ('joke', 'ignore', 'channels')
+DEFAULT_WRITE_TABLES = ('joke', 'ignore', 'channels')
+LOG_MAXLEN = 1000
 
-CHANNEL_CACHE_TTL = 60
 
-LOG_BUFFER = deque(maxlen=1000)
-_log_seq_counter = itertools.count(1)
+def loadYAML(filename):
+    with open(filename) as f:
+        return yaml.safe_load(f) or {}
 
 
 class LogBufferHandler(logging.Handler):
+    def __init__(self, maxlen=LOG_MAXLEN):
+        super().__init__()
+        self.buffer = deque(maxlen=maxlen)
+        self._seq = itertools.count(1)
+
+    def resize(self, maxlen):
+        self.buffer = deque(self.buffer, maxlen=maxlen)
+
     def emit(self, record):
-        LOG_BUFFER.append({
-            'seq': next(_log_seq_counter),
+        self.buffer.append({
+            'seq': next(self._seq),
             'ts': time.strftime('%H:%M:%S', time.localtime(record.created)),
             'level': logging.getLevelName(record.levelno),
             'name': record.name,
@@ -32,8 +41,26 @@ class LogBufferHandler(logging.Handler):
         })
 
 
-_LOG_HANDLER = LogBufferHandler()
-logging.getLogger().addHandler(_LOG_HANDLER)
+_log_handler = LogBufferHandler()
+logging.getLogger().addHandler(_log_handler)
+
+DEFAULT_SPACY_MODEL = 'en_core_web_sm'
+_nlp = None
+_spacy_model = None
+
+
+def configure_spacy(model):
+    global _nlp, _spacy_model
+    if model != _spacy_model:
+        _spacy_model = model or DEFAULT_SPACY_MODEL
+        _nlp = None
+
+
+def get_nlp():
+    global _nlp
+    if _nlp is None:
+        _nlp = spacy.load(_spacy_model or DEFAULT_SPACY_MODEL)
+    return _nlp
 
 
 def jerr(data, status):
@@ -44,11 +71,10 @@ def _ignore_truthy(val):
         return False
     return str(val).strip().lower() not in ('0', 'false', '')
 
-nlp = spacy.load("en_core_web_sm")
 
 def replace_random_noun_chunk(text, replacement="these walnuts"):
     """Uses spacy to find all noun 'chunks' <text>. Then replaces a random noun chunk with the <replacement>. Returns result as string"""
-    doc = nlp(text)
+    doc = get_nlp()(text)
     noun_chunks = list(doc.noun_chunks)
     if not noun_chunks:
         return None
@@ -89,20 +115,41 @@ class ChannelChatMessageAlert(Alert):
 
 
 class DeezBot(CommandBot):
-    def __init__(self, jdelay=[4,15], jlimit=20, loop_delay=300, *args, **kwargs):
+    def __init__(self, cfg=None, *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
         client_secret = os.getenv("DEEZ_CLIENT_SECRET")
         if not client_id or not client_secret:
             raise ValueError("Environment variables DEEZ_CLIENT_ID and DEEZ_CLIENT_SECRET are required")
-        kwargs['client_id'] = client_id
-        kwargs['client_secret'] = client_secret
-        super().__init__(*args, **kwargs)
-        self.jdelay = jdelay
+        cfg = dict(cfg or {})
+        for key in ('scopes', 'channels', 'storage', 'browser', 'redirect_uri',
+                    'jdelay', 'jlimit', 'loop_delay', 'default_jemote', 'spacy_model'):
+            if key not in cfg and key in kwargs:
+                cfg[key] = kwargs.pop(key)
+
+        web_cfg = dict(cfg.get('web') or {})
+        self.web_host = web_cfg.get('host', 'localhost')
+        self.web_port = int(web_cfg.get('port', 5000))
+        self.web_static_dirs = list(web_cfg.get('static_dirs') or ['ui'])
+        _log_handler.resize(int(web_cfg.get('log_buffer_size') or LOG_MAXLEN))
+
+        configure_spacy(cfg.get('spacy_model'))
+        self.default_jemote = cfg.get('default_jemote') or 'Kappa'
+        self.channel_cache_ttl = float((cfg.get('enrichment') or {}).get('channel_cache_ttl') or 60)
+        self.db_write_tables = tuple(cfg.get('db_write_tables') or DEFAULT_WRITE_TABLES)
+        self.ui_cfg = dict(cfg.get('ui') or {})
+
+        pg_cfg = {key: cfg[key] for key in ('scopes', 'channels', 'storage', 'browser') if key in cfg}
+        pg_cfg['redirect_uri'] = cfg.get('redirect_uri') or f"http://{self.web_host}:{self.web_port}/callback"
+        pg_cfg['client_id'] = client_id
+        pg_cfg['client_secret'] = client_secret
+        alert_objs = kwargs.pop('alert_objs', None) or {'channel.chat.message': ChannelChatMessageAlert}
+        super().__init__(twitch_config=pg_cfg, alert_objs=alert_objs, **kwargs)
+        self.jdelay = list(cfg.get('jdelay') or [4, 15])
         self.jcount = 0
         self.jcountmax = random.randint(*self.jdelay)
-        self.loop_delay = loop_delay
-        self.jlimit = jlimit
+        self.loop_delay = int(cfg.get('loop_delay') or 300)
+        self.jlimit = float(cfg.get('jlimit') or 20)
         self.lastjoke = 0
         self._started_at = time.time()
 
@@ -115,7 +162,7 @@ class DeezBot(CommandBot):
         chans = await self._get_channel_list()
         if u_id in chans:
            return chans[u_id]["jemote"]
-        return "Kappa"
+        return self.default_jemote
 
     async def makeJoke(self, data):
         message = data['message']['text']
@@ -165,7 +212,7 @@ class DeezBot(CommandBot):
 
     async def _enrich_channels(self):
         chans = await self._get_channel_list()
-        if not getattr(self, '_chan_cached_at', 0) or time.monotonic() - self._chan_cached_at > CHANNEL_CACHE_TTL:
+        if not getattr(self, '_chan_cached_at', 0) or time.monotonic() - self._chan_cached_at > self.channel_cache_ttl:
             info_map, live_map = {}, {}
             ids = list(chans.keys())
             if ids:
@@ -234,7 +281,7 @@ class DeezBot(CommandBot):
         if self._is_own_channel(user, channel):
             try:
                 await self._update_channel_list(user["user_id"], config={
-                        "jemote": "Kappa"
+                        "jemote": self.default_jemote
                     })
                 await self.send_chat(
                         f":3 @{user['username']}", 
@@ -351,7 +398,7 @@ class DeezBot(CommandBot):
         if not users:
             return jerr({"status": False, "error": f"twitch user '{login}' not found"}, 404)
         u = users[0]
-        await self.storage.insert("channels", {"user_id": str(u['id']), "jemote": body.get('jemote') or 'Kappa'})
+        await self.storage.insert("channels", {"user_id": str(u['id']), "jemote": body.get('jemote') or self.default_jemote})
         logger.info(f"UI added channel {u['login']} ({u['id']})")
         return self.app.response_json({"status": True, "added": {"user_id": u['id'], "login": u['login']}})
 
@@ -395,14 +442,30 @@ class DeezBot(CommandBot):
     @route('/api/logs')
     async def api_logs(self, request):
         lines = int(request.query.get('lines') or 200)
-        lines = max(1, min(lines, 1000))
-        entries = list(LOG_BUFFER)[-lines:]
+        lines = max(1, min(lines, LOG_MAXLEN))
+        buf = _log_handler.buffer
+        entries = list(buf)[-lines:]
         return self.app.response_json({
             "status": True,
-            "total": len(LOG_BUFFER),
-            "oldest_seq": LOG_BUFFER[0]['seq'] if LOG_BUFFER else None,
-            "newest_seq": LOG_BUFFER[-1]['seq'] if LOG_BUFFER else None,
+            "total": len(buf),
+            "oldest_seq": buf[0]['seq'] if buf else None,
+            "newest_seq": buf[-1]['seq'] if buf else None,
             "entries": entries,
+        })
+
+    @route('/api/config')
+    async def api_config(self, request):
+        return self.app.response_json({
+            "status": True,
+            "web_host": self.web_host,
+            "web_port": self.web_port,
+            "jdelay": self.jdelay,
+            "jlimit": self.jlimit,
+            "loop_delay": self.loop_delay,
+            "default_jemote": self.default_jemote,
+            "channel_cache_ttl": self.channel_cache_ttl,
+            "db_write_tables": list(self.db_write_tables),
+            "ui": self.ui_cfg,
         })
 
     @route('/api/test/joke', method='POST')
@@ -456,7 +519,7 @@ class DeezBot(CommandBot):
                 tables.append({
                     "name": name,
                     "row_count": row[0] if row else 0,
-                    "writable": clean in WRITE_TABLES,
+                    "writable": clean in self.db_write_tables,
                 })
         return self.app.response_json({"status": True, "tables": tables})
 
@@ -470,7 +533,7 @@ class DeezBot(CommandBot):
     @route('/api/db/table/{table}', method='POST')
     async def api_db_table_insert(self, request):
         table = self.storage._clean_str(request.match_info['table'])
-        if table not in WRITE_TABLES:
+        if table not in self.db_write_tables:
             return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
         body = await request.json()
         data = {k: str(v) for k, v in body.items()} if isinstance(body, dict) else {}
@@ -483,7 +546,7 @@ class DeezBot(CommandBot):
     @route('/api/db/table/{table}', method='DELETE')
     async def api_db_table_delete(self, request):
         table = self.storage._clean_str(request.match_info['table'])
-        if table not in WRITE_TABLES:
+        if table not in self.db_write_tables:
             return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
         body = await request.json()
         where = (body or {}).get('where')
@@ -499,7 +562,7 @@ class DeezBot(CommandBot):
     async def before_login(self):
         if not self.app.is_running():
             self.app.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.app.static_dirs = ['ui']
+            self.app.static_dirs = list(getattr(self, 'web_static_dirs', None) or ['ui'])
             await self.app.start()
 
     async def after_login(self):
@@ -557,7 +620,5 @@ if __name__ == '__main__':
         level=logging.INFO,
         handlers=[RichHandler(rich_tracebacks=True)]
     )
-    cfg = loadJSON('cfg.json')
-    cfg['alert_objs'] = {'channel.chat.message': ChannelChatMessageAlert}
-    bot = DeezBot(**cfg)
+    bot = DeezBot(loadYAML('cfg.yaml'))
     asyncio.run(bot.start(hold=True))
