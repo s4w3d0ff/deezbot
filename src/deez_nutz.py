@@ -4,14 +4,18 @@ import asyncio
 import logging
 import time
 import os
-import re
 import aiosqlite
+from aiohttp import web as aweb
 from poolguy.core.storage import loadJSON
 from poolguy import CommandBot, Alert, rate_limit, command, route
 
 logger = logging.getLogger(__name__)
 
 WRITE_TABLES = ('joke', 'ignore', 'channels')
+
+
+def jerr(data, status):
+    return aweb.json_response(data, status=status)
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -66,8 +70,6 @@ class DeezBot(CommandBot):
         kwargs['client_id'] = client_id
         kwargs['client_secret'] = client_secret
         super().__init__(*args, **kwargs)
-        self.app.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.app.static_dirs = ['ui']
         self.jdelay = jdelay
         self.jcount = 0
         self.jcountmax = random.randint(*self.jdelay)
@@ -236,7 +238,7 @@ class DeezBot(CommandBot):
         body = await request.json()
         message = (body.get('message') or '').strip()
         if not message:
-            return self.app.response_json({"status": False, "error": "missing 'message'"}, status=400)
+            return jerr({"status": False, "error": "missing 'message'"}, 400)
         jokes = await self._get_jokes()
         for key, joke in jokes.items():
             if key in message.lower():
@@ -253,7 +255,7 @@ class DeezBot(CommandBot):
         body = await request.json()
         message = (body.get('message') or '').strip()
         if not message:
-            return self.app.response_json({"status": False, "error": "missing 'message'"}, status=400)
+            return jerr({"status": False, "error": "missing 'message'"}, 400)
         out = ""
         sent_chunks = 0
         for word in message.split(" "):
@@ -297,11 +299,11 @@ class DeezBot(CommandBot):
     async def api_db_table_insert(self, request):
         table = self.storage._clean_str(request.match_info['table'])
         if table not in WRITE_TABLES:
-            return self.app.response_json({"status": False, "error": f"table '{table}' is read-only"}, status=403)
+            return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
         body = await request.json()
         data = {k: str(v) for k, v in body.items()} if isinstance(body, dict) else {}
         if not data:
-            return self.app.response_json({"status": False, "error": "empty row payload"}, status=400)
+            return jerr({"status": False, "error": "empty row payload"}, 400)
         await self.storage.insert(table, data)
         logger.info(f"UI db insert into {table}: {data}")
         return self.app.response_json({"status": True, "inserted": data})
@@ -310,12 +312,12 @@ class DeezBot(CommandBot):
     async def api_db_table_delete(self, request):
         table = self.storage._clean_str(request.match_info['table'])
         if table not in WRITE_TABLES:
-            return self.app.response_json({"status": False, "error": f"table '{table}' is read-only"}, status=403)
+            return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
         body = await request.json()
         where = (body or {}).get('where')
         params = tuple(body.get('params') or ())
         if not where:
-            return self.app.response_json({"status": False, "error": "missing 'where' clause"}, status=400)
+            return jerr({"status": False, "error": "missing 'where' clause"}, 400)
         await self.storage.delete(table, where=where, params=params)
         logger.info(f"UI db delete from {table}: {where} {params}")
         return self.app.response_json({"status": True, "deleted_from": table})
@@ -324,6 +326,8 @@ class DeezBot(CommandBot):
     #===================================================================================
     async def before_login(self):
         if not self.app.is_running():
+            self.app.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.app.static_dirs = ['ui']
             await self.app.start()
 
     async def after_login(self):
