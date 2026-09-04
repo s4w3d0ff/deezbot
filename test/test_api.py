@@ -69,6 +69,8 @@ def test_before_login_starts_steady_state_server(tmp_path):
 
 def test_status_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
+    asyncio.run(bot.storage.insert('channels', {'user_id': '1000000', 'jemote': 'Kappa'}))
 
     async def probe(client):
         r = await client.get('/api/status')
@@ -76,8 +78,112 @@ def test_status_endpoint(tmp_path):
         body = await r.json()
         assert body['authenticated'] is False
         assert body['user_id'] is None
+        assert body['username'] is None
         assert body['ws_connected'] is False
-        assert body['channels'] == {}
+        assert body['uptime_seconds'] >= 0
+        assert body['channels_total'] == 1
+        assert body['channels_live'] == 0
+
+    run_test(bot, probe)
+
+
+def test_channels_enriched(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('channels', {'user_id': '2000001', 'jemote': 'GOTTEM'}))
+    asyncio.run(bot.storage.insert('channels', {'user_id': '2000002', 'jemote': 'Kappa'}))
+
+    async def fake_get_users(ids=None, logins=None):
+        return [
+            {'id': '2000001', 'login': 'livestreamer', 'display_name': 'LiveStreamer'},
+            {'id': '2000002', 'login': 'offstreamer', 'display_name': 'OffStreamer'},
+        ]
+
+    async def fake_get_streams(first=None, **kwargs):
+        return [{'id': '2000001', 'user_id': '2000001', 'viewer_count': 42, 'title': 'just deezing'}]
+
+    bot.http.getUsers = fake_get_users
+    bot.http.getStreams = fake_get_streams
+
+    async def probe(client):
+        r = await client.get('/api/channels')
+        assert r.status == 200
+        body = await r.json()
+        assert body['total'] == 2 and body['live'] == 1
+        by_id = {c['user_id']: c for c in body['channels']}
+        live = by_id['2000001']
+        assert live['is_live'] is True
+        assert live['viewers'] == 42
+        assert live['title'] == 'just deezing'
+        assert live['login'] == 'livestreamer'
+        assert live['jemote'] == 'GOTTEM'
+        off = by_id['2000002']
+        assert off['is_live'] is False and off['viewers'] == 0 and off['title'] == ''
+        assert body['channels'][0]['user_id'] == '2000001'
+
+    run_test(bot, probe)
+
+
+def test_ignores_enriched(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('ignore', {'user_id': '3000001', 'ignore': 'True'}))
+    asyncio.run(bot.storage.insert('ignore', {'user_id': '3000002', 'ignore': 'False'}))
+
+    async def fake_get_users(ids=None, logins=None):
+        return [{'id': '3000001', 'login': 'spammer', 'display_name': 'SpamLord'}]
+
+    bot.http.getUsers = fake_get_users
+
+    async def probe(client):
+        r = await client.get('/api/ignores')
+        assert r.status == 200
+        body = await r.json()
+        assert body['total'] == 2
+        by_id = {u['user_id']: u for u in body['users']}
+        assert by_id['3000001']['login'] == 'spammer'
+        assert by_id['3000001']['display_name'] == 'SpamLord'
+        assert by_id['3000002']['login'] is None
+
+    run_test(bot, probe)
+
+
+def test_status_channel_counts(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('channels', {'user_id': '4000001', 'jemote': 'Kappa'}))
+
+    async def fake_get_users(ids=None, logins=None):
+        return [{'id': '4000001', 'login': 'somechan', 'display_name': 'SomeChan'}]
+
+    async def fake_get_streams(first=None, **kwargs):
+        return []
+
+    bot.http.getUsers = fake_get_users
+    bot.http.getStreams = fake_get_streams
+
+    async def probe(client):
+        r = await client.get('/api/status')
+        body = await r.json()
+        assert body['channels_total'] == 1
+        assert body['channels_live'] == 0
+        assert body['uptime_seconds'] >= 0
+
+    run_test(bot, probe)
+
+
+def test_commands_listing(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        r = await client.get('/api/commands')
+        assert r.status == 200
+        body = await r.json()
+        names = [c['name'] for c in body['commands']]
+        assert set(names) >= {'jemote', 'join', 'leave', 'ignore', 'unignore'}
+        assert len(names) == len(set(names))
+        by_name = {c['name']: c for c in body['commands']}
+        if 'commands' in by_name:
+            assert 'help' in by_name['commands']['aliases']
+        assert not any(c['name'] == 'help' for c in body['commands'])
+        assert body['total'] == len(body['commands'])
 
     run_test(bot, probe)
 

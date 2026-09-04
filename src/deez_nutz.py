@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import os
+from collections import deque
 import aiosqlite
 from aiohttp import web as aweb
 from poolguy.core.storage import loadJSON
@@ -12,6 +13,8 @@ from poolguy import CommandBot, Alert, rate_limit, command, route
 logger = logging.getLogger(__name__)
 
 WRITE_TABLES = ('joke', 'ignore', 'channels')
+
+CHANNEL_CACHE_TTL = 60
 
 
 def jerr(data, status):
@@ -60,6 +63,7 @@ class ChannelChatMessageAlert(Alert):
             logger.exception(f"Error in process_message():\n")
             raise
 
+
 class DeezBot(CommandBot):
     def __init__(self, jdelay=[4,15], jlimit=20, loop_delay=300, *args, **kwargs):
         # Fetch sensitive data from environment variables
@@ -76,6 +80,7 @@ class DeezBot(CommandBot):
         self.loop_delay = loop_delay
         self.jlimit = jlimit
         self.lastjoke = 0
+        self._started_at = time.time()
 
     def _resetjcount(self):
         self.lastjoke = 0
@@ -131,6 +136,48 @@ class DeezBot(CommandBot):
     async def _get_jokes(self):
         r = await self.storage.query("joke")
         return {row["keyword"]: row["joke"] for row in r}
+
+    async def _enrich_channels(self):
+        chans = await self._get_channel_list()
+        if not getattr(self, '_chan_cached_at', 0) or time.monotonic() - self._chan_cached_at > CHANNEL_CACHE_TTL:
+            info_map, live_map = {}, {}
+            ids = list(chans.keys())
+            if ids:
+                try:
+                    users = await self.http.getUsers(ids=ids)
+                    for u in users:
+                        info_map[u['id']] = {'login': u['login'], 'display_name': u['display_name']}
+                except Exception as e:
+                    logger.warning(f"Channel username enrichment failed: {e}")
+                try:
+                    streams = await self.http.getStreams(user_id=ids, type='live', first=100)
+                    for s in streams:
+                        live_map[s['id']] = {'is_live': True, 'viewers': s.get('viewer_count') or 0, 'title': s.get('title') or ''}
+                except Exception as e:
+                    logger.warning(f"Channel stream status check failed: {e}")
+            self._chan_info_map, self._chan_live_map = info_map, live_map
+            self._chan_cached_at = time.monotonic()
+        out = {}
+        for uid, row in chans.items():
+            info = dict(row)
+            info.update(self._chan_info_map.get(uid, {'login': None, 'display_name': None}))
+            info.setdefault('is_live', False)
+            info['viewers'] = 0
+            info['title'] = ''
+            live = self._chan_live_map.get(uid)
+            if live:
+                info.update(live)
+            out[uid] = info
+        return out
+
+    async def _enrich_users(self, user_ids):
+        users = {}
+        try:
+            for u in await self.http.getUsers(ids=list(user_ids)):
+                users[u['id']] = {'login': u['login'], 'display_name': u['display_name']}
+        except Exception as e:
+            logger.warning(f"Ignore list username enrichment failed: {e}")
+        return users
     
     def _is_channel_owner(self, user, channel):
         return int(channel["broadcaster_id"]) == int(user["user_id"])
@@ -224,14 +271,62 @@ class DeezBot(CommandBot):
     @route('/api/status')
     async def api_status(self, request):
         token = await self.storage.get_token('twitch') or {}
-        chans = await self._get_channel_list()
+        chans = await self._enrich_channels()
+        username = None
+        try:
+            users = await self.http.getUsers(ids=[str(self.http.user_id)]) if self.http.user_id else []
+            username = users[0]['login'] if users else None
+        except Exception as e:
+            logger.warning(f"Bot username lookup failed: {e}")
+        live_count = sum(1 for c in chans.values() if c.get('is_live'))
+        ignores_total = len(await self.storage.query("ignore"))
+        jokes_total = len(await self._get_jokes())
         return self.app.response_json({
             "authenticated": bool(self.http.user_id),
             "user_id": str(self.http.user_id) if self.http.user_id else None,
+            "username": username,
             "token_expires_time": token.get('expires_time'),
             "ws_connected": self.ws._socket is not None and self.ws._session_id is not None,
-            "channels": chans,
+            "uptime_seconds": int(time.time() - getattr(self, '_started_at', time.time())),
+            "channels_total": len(chans),
+            "channels_live": live_count,
+            "ignores_total": ignores_total,
+            "jokes_total": jokes_total,
         })
+
+    @route('/api/channels')
+    async def api_channels(self, request):
+        chans = await self._enrich_channels()
+        rows = sorted(chans.values(), key=lambda c: (not c.get('is_live'), str(c.get('login') or '')))
+        return self.app.response_json({
+            "status": True,
+            "total": len(rows),
+            "live": sum(1 for r in rows if r.get('is_live')),
+            "channels": rows,
+        })
+
+    @route('/api/ignores')
+    async def api_ignores(self, request):
+        rows = await self.storage.query("ignore")
+        users = await self._enrich_users([r['user_id'] for r in rows]) if rows else {}
+        out = []
+        for r in rows:
+            uid = r['user_id']
+            info = users.get(uid, {'login': None, 'display_name': None})
+            out.append({'user_id': uid, **info, 'ignored': bool(r.get('ignore', True))})
+        return self.app.response_json({"status": True, "total": len(out), "users": out})
+
+    @route('/api/commands')
+    async def api_commands(self, request):
+        aliases = set()
+        for cmd in self._commands.values():
+            aliases.update(cmd.get('aliases') or [])
+        out = []
+        for name, cmd in sorted(self._commands.items()):
+            if name in aliases:
+                continue
+            out.append({'name': name, 'aliases': cmd.get('aliases') or [], 'help': (cmd.get('help') or '').strip()})
+        return self.app.response_json({"status": True, "total": len(out), "commands": out})
 
     @route('/api/test/joke', method='POST')
     async def api_test_joke(self, request):
