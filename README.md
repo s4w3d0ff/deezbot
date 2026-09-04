@@ -120,7 +120,7 @@ The server binds localhost only — no auth layer, do not expose the port. Write
 ```
 deezbot/
 ├── src/                  # Python source code
-│   ├── deez_nutz.py      # DeezBot hub: mixin composition, joke state, storage helpers
+│   ├── bot.py            # DeezBot hub: mixin composition, joke state, storage helpers
 │   ├── alerts.py         # ChannelChatMessageAlert (chat message handler)
 │   ├── commands.py       # CommandsMixin (jemote/join/leave/ignore/unignore)
 │   ├── config.py         # YAML loader + default writable tables

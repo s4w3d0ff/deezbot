@@ -14,7 +14,7 @@ os.environ['DEEZ_CLIENT_SECRET'] = 'test'
 from aiohttp.test_utils import TestClient, TestServer
 from poolguy.core.storage import SQLiteStorage
 
-import deez_nutz
+import bot as deezbot
 
 logger = logging.getLogger('deeztest')
 
@@ -28,7 +28,7 @@ def freeport():
 
 
 def make_bot(tmp):
-    bot = deez_nutz.DeezBot(
+    bot = deezbot.DeezBot(
         redirect_uri='http://localhost:5000/callback',
         scopes=['user:read:chat', 'user:write:chat'],
         storage=SQLiteStorage(os.path.join(tmp, 'twitch.db')),
@@ -482,11 +482,11 @@ def test_config_endpoint(tmp_path):
 
 
 def test_config_sections_from_yaml(tmp_path):
-    bot = deez_nutz.DeezBot(cfg={
+    bot = deezbot.DeezBot(cfg={
         'scopes': ['user:read:chat', 'user:write:chat'],
         'channels': {'channel.chat.message': None},
         'storage': SQLiteStorage(os.path.join(str(tmp_path), 'twitch.db')),
-        'spacy_model': deez_nutz.DEFAULT_SPACY_MODEL,
+        'spacy_model': deezbot.DEFAULT_SPACY_MODEL,
         'jdelay': [7, 9],
         'jlimit': 321,
         'loop_delay': 61,
@@ -500,7 +500,7 @@ def test_config_sections_from_yaml(tmp_path):
     assert bot.web_host == '127.0.0.1'
     assert bot.web_port == 5931
     assert bot.web_static_dirs == ['ui']
-    assert deez_nutz._log_handler.buffer.maxlen == 55
+    assert deezbot._log_handler.buffer.maxlen == 55
     assert bot.jdelay == [7, 9]
     assert bot.jlimit == 321
     assert bot.loop_delay == 61
