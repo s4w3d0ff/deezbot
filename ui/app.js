@@ -74,7 +74,24 @@ async function refreshStatus() {
     c.append(el('div', k, 'k'), el('div', v, 'v'));
     grid.append(c);
   }
-  await refreshChannels();
+
+  renderJokeState(s.joke_state || {});
+}
+
+function renderJokeState(js) {
+  const cells = [
+    ['keyword cooldown', `${js.cooldown_seconds ?? '-'}s window`],
+    ['last joke fired', js.seconds_since_last_joke === null ? 'never' : `${js.seconds_since_last_joke}s ago`],
+    ['keyword cooldown left', js.keyword_cooldown_remaining > 0 ? `${js.keyword_cooldown_remaining}s remaining` : 'open'],
+    ['random joke counter', `${js.random_counter ?? 0} / ${js.random_next_at ?? '-'}`],
+  ];
+  const grid = $('#joke-state-grid');
+  grid.replaceChildren();
+  for (const [k, v] of cells) {
+    const c = el('div', null, 'cell');
+    c.append(el('div', k, 'k'), el('div', v, 'v'));
+    grid.append(c);
+  }
 }
 
 async function refreshChannels() {
@@ -93,33 +110,81 @@ async function refreshChannels() {
       el('td', c.login || '-', c.is_live ? '' : 'muted'),
       el('td', c.display_name || '-'),
       el('td', c.user_id, 'muted'),
-      el('td', c.jemote),
+    );
+    const jemoteTd = tdInput(c.jemote, async v => { if (!v) return; await post('/api/db/table/channels', { user_id: String(c.user_id), jemote: v }); refreshChannels(); });
+    tr.append(jemoteTd);
+    tr.append(
       el('td', c.is_live ? String(c.viewers) : '-', c.is_live ? '' : 'muted'),
     );
     const titleTd = el('td', c.title || '-', (c.is_live && c.title) ? '' : 'muted');
     if (c.title) titleTd.title = c.title;
     tr.append(titleTd);
+    const actTd = el('td');
+    const b = el('button', 'remove');
+    b.title = `stop watching channel ${c.login || c.user_id}`;
+    b.addEventListener('click', async () => {
+      if (!confirm(`stop watching channel ${c.login || c.user_id}?`)) return;
+      try { await del('/api/db/table/channels', { where: 'user_id = ?', params: [String(c.user_id)] }); refreshChannels(); refreshStatus(); } catch (_) {}
+    });
+    actTd.append(b);
+    tr.append(actTd);
     tbody.append(tr);
   }
 }
 
-async function loadCommands() {
+$('#add-channel-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target;
+  const login = form.login.value.trim();
+  if (!login) return toast('username required');
+  try {
+    await post('/api/channels', { login, jemote: form.jemote.value.trim() || undefined });
+    form.reset();
+    refreshChannels();
+    refreshStatus();
+  } catch (_) {}
+});
+
+async function loadIgnores() {
   let body;
-  try { body = await api('/api/commands'); } catch (_) { return; }
-  const rows = body.commands || [];
-  $('#cmd-count').textContent = `${rows.length} commands`;
-  const tbody = $('#commands-table tbody');
+  try { body = await api('/api/ignores'); } catch (_) { return; }
+  const rows = body.users || [];
+  $('#ignore-count').textContent = `${rows.length} users`;
+  const tbody = $('#ignores-table tbody');
   tbody.replaceChildren();
-  for (const c of rows) {
+  for (const u of rows) {
     const tr = el('tr');
-    tr.append(
-      el('td', c.name),
-      el('td', c.aliases.join(', ') || '-', c.aliases.length ? '' : 'muted'),
-      el('td', c.help || '-'),
-    );
+    tr.append(el('td', u.user_id, 'muted'), el('td', u.login || '-'), el('td', u.display_name || '-'));
+    const actTd = el('td');
+    if (u.ignored) {
+      const b = el('button', 'unignore');
+      b.addEventListener('click', async () => { try { await post('/api/db/table/ignore', { user_id: String(u.user_id), ignore: 'False' }); loadIgnores(); } catch (_) {} });
+      actTd.append(b);
+    } else {
+      const b = el('button', 'remove');
+      b.addEventListener('click', async () => {
+        if (!confirm(`remove ${u.login || u.user_id} from ignore list?`)) return;
+        try { await del('/api/db/table/ignore', { where: 'user_id = ?', params: [String(u.user_id)] }); loadIgnores(); } catch (_) {}
+      });
+      actTd.append(b);
+    }
+    tr.append(actTd);
     tbody.append(tr);
   }
 }
+
+$('#add-ignore-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target;
+  const login = form.login.value.trim();
+  if (!login) return toast('username required');
+  try {
+    await post('/api/ignores', { login });
+    form.reset();
+    loadIgnores();
+    refreshStatus();
+  } catch (_) {}
+});
 
 $('#btn-joke').addEventListener('click', async () => {
   const message = $('#joke-input').value.trim();
@@ -218,62 +283,69 @@ $('#new-joke-form').addEventListener('submit', async e => {
   } catch (_) {}
 });
 
-async function loadIgnores() {
+async function loadCommands() {
   let body;
-  try { body = await api('/api/ignores'); } catch (_) { return; }
-  const rows = body.users || [];
-  $('#ignore-count').textContent = `${rows.length} users`;
-  const tbody = $('#ignores-table tbody');
+  try { body = await api('/api/commands'); } catch (_) { return; }
+  const rows = body.commands || [];
+  $('#cmd-count').textContent = `${rows.length} commands`;
+  const tbody = $('#commands-table tbody');
   tbody.replaceChildren();
-  for (const u of rows) {
+  for (const c of rows) {
     const tr = el('tr');
-    tr.append(el('td', u.user_id, 'muted'), el('td', u.login || '-'), el('td', u.display_name || '-'));
-    const actTd = el('td');
-    if (u.ignored) {
-      const b = el('button', 'unignore');
-      b.addEventListener('click', async () => { try { await post('/api/db/table/ignore', { user_id: String(u.user_id), ignore: 'False' }); loadIgnores(); } catch (_) {} });
-      actTd.append(b);
-    } else {
-      const b = el('button', 'remove');
-      b.addEventListener('click', async () => {
-        if (!confirm(`remove ${u.login || u.user_id} from ignore list?`)) return;
-        try { await del('/api/db/table/ignore', { where: 'user_id = ?', params: [String(u.user_id)] }); loadIgnores(); } catch (_) {}
-      });
-      actTd.append(b);
-    }
-    tr.append(actTd);
+    tr.append(
+      el('td', c.name),
+      el('td', c.aliases.join(', ') || '-', c.aliases.length ? '' : 'muted'),
+      el('td', c.help || '-'),
+    );
     tbody.append(tr);
   }
 }
 
-async function loadDataChannels() {
-  let body;
-  try { body = await api('/api/channels'); } catch (_) { return; }
-  const rows = body.channels || [];
-  $('#data-chan-count').textContent = `${rows.length} channels`;
-  const tbody = $('#chans-table tbody');
-  tbody.replaceChildren();
-  for (const c of rows) {
-    const tr = el('tr');
-    tr.append(el('td', c.user_id, 'muted'));
-    const loginTd = el('td');
-    if (c.is_live) loginTd.append(el('span', null, 'live-dot on'));
-    loginTd.append(c.login || '-');
-    tr.append(loginTd);
-    const jemoteTd = tdInput(c.jemote, async v => { if (!v) return; await post('/api/db/table/channels', { user_id: String(c.user_id), jemote: v }); loadDataChannels(); });
-    tr.append(jemoteTd);
-    const actTd = el('td');
-    const b = el('button', 'leave');
-    b.title = `stop watching channel ${c.login || c.user_id}`;
-    b.addEventListener('click', async () => {
-      if (!confirm(`stop watching channel ${c.login || c.user_id}?`)) return;
-      try { await del('/api/db/table/channels', { where: 'user_id = ?', params: [String(c.user_id)] }); loadDataChannels(); refreshStatus(); } catch (_) {}
-    });
-    actTd.append(b);
-    tr.append(actTd);
-    tbody.append(tr);
-  }
+const LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+let logCache = [];
+let logState = { minLevel: '', lastSeq: 0, atBottom: true };
+
+function levelPass(entry) {
+  if (!logState.minLevel) return true;
+  return LOG_LEVELS.indexOf(entry.level) >= LOG_LEVELS.indexOf(logState.minLevel);
 }
+
+function logLineText(e) {
+  return `${e.ts} ${e.level.padEnd(7)} [${e.name}] ${e.msg}`;
+}
+
+function appendLogLines(entries) {
+  const view = $('#log-view');
+  for (const e of entries) {
+    if (!levelPass(e)) continue;
+    view.append(el('span', logLineText(e), `log-line log-${e.level.toLowerCase()}`), '\n');
+  }
+  if (logState.atBottom) view.scrollTop = view.scrollHeight;
+}
+
+function renderLogsFull() {
+  const view = $('#log-view');
+  view.replaceChildren();
+  appendLogLines(logCache);
+  logState.lastSeq = logCache.length ? logCache[logCache.length - 1].seq : 0;
+}
+
+async function pollLogs(full) {
+  if (activeTab !== 'status') return;
+  let body;
+  try { body = await api('/api/logs?lines=1000'); } catch (_) { return; }
+  logCache = body.entries || [];
+  $('#log-count').textContent = `${body.total} buffered`;
+  if (full) { renderLogsFull(); return; }
+  const fresh = logCache.filter(e => e.seq > logState.lastSeq);
+  appendLogLines(fresh);
+  if (fresh.length) logState.lastSeq = fresh[fresh.length - 1].seq;
+}
+
+$('#log-view').addEventListener('scroll', e => { logState.atBottom = e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 8; });
+setInterval(() => pollLogs(false), 2000);
+$('#btn-log-refresh').addEventListener('click', () => pollLogs(true));
+$('#log-level').addEventListener('change', e => { logState.minLevel = e.target.value; renderLogsFull(); });
 
 let rawState = { current: null, writable: false };
 
@@ -401,60 +473,16 @@ $('#new-row-form').addEventListener('submit', async e => {
 });
 
 let activeTab = 'status';
-const LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
-let logCache = [];
-let logState = { minLevel: '', lastSeq: 0, atBottom: true };
-
-function levelPass(entry) {
-  if (!logState.minLevel) return true;
-  return LOG_LEVELS.indexOf(entry.level) >= LOG_LEVELS.indexOf(logState.minLevel);
-}
-
-function logLineText(e) {
-  return `${e.ts} ${e.level.padEnd(7)} [${e.name}] ${e.msg}`;
-}
-
-function appendLogLines(entries) {
-  const view = $('#log-view');
-  for (const e of entries) {
-    if (!levelPass(e)) continue;
-    view.append(el('span', logLineText(e), `log-line log-${e.level.toLowerCase()}`), '\n');
-  }
-  if (logState.atBottom) view.scrollTop = view.scrollHeight;
-}
-
-function renderLogsFull() {
-  const view = $('#log-view');
-  view.replaceChildren();
-  appendLogLines(logCache);
-  logState.lastSeq = logCache.length ? logCache[logCache.length - 1].seq : 0;
-}
-
-async function pollLogs(full) {
-  if (activeTab !== 'log') return;
-  let body;
-  try { body = await api('/api/logs?lines=1000'); } catch (_) { return; }
-  logCache = body.entries || [];
-  $('#log-count').textContent = `${body.total} buffered`;
-  if (full) { renderLogsFull(); return; }
-  const fresh = logCache.filter(e => e.seq > logState.lastSeq);
-  appendLogLines(fresh);
-  if (fresh.length) logState.lastSeq = fresh[fresh.length - 1].seq;
-}
-
-$('#log-view').addEventListener('scroll', e => { logState.atBottom = e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 8; });
-setInterval(() => pollLogs(false), 2000);
-$('#btn-log-refresh').addEventListener('click', () => pollLogs(true));
-$('#log-level').addEventListener('change', e => { logState.minLevel = e.target.value; renderLogsFull(); });
-
 function loadActiveTab() {
-  if (activeTab === 'data') {
-    loadJokes();
+  if (activeTab === 'channels') {
+    refreshChannels();
+  } else if (activeTab === 'ignores') {
     loadIgnores();
-    loadDataChannels();
-    loadRawTables();
-  } else if (activeTab === 'log') {
+  } else if (activeTab === 'jokes') {
+    loadJokes();
+  } else if (activeTab === 'status') {
     pollLogs(true);
+    loadRawTables();
   }
 }
 
@@ -470,5 +498,5 @@ refreshStatus();
 loadCommands();
 loadIgnores();
 loadJokes();
-loadDataChannels();
+pollLogs(true);
 loadRawTables();
