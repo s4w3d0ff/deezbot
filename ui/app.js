@@ -26,6 +26,15 @@ async function api(path, opts) {
 const post = (path, data) => api(path, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
 const del = (path, data) => api(path, { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data || {}) });
 
+let uiCfg = {};
+function loadConfig() {
+  return api('/api/config').then(body => { if (body && body.status) uiCfg = body; }).catch(() => {});
+}
+function uiOpt(key, fallback) {
+  const v = (uiCfg.ui || {})[key];
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+
 function el(tag, text, cls) {
   const n = document.createElement(tag);
   if (text !== undefined && text !== null) n.textContent = String(text);
@@ -248,7 +257,7 @@ function tdInput(origValue, onSave) {
 
 async function loadJokes() {
   let body;
-  try { body = await api('/api/db/table/joke?limit=500'); } catch (_) { return; }
+  try { body = await api(`/api/db/table/joke?limit=${uiOpt('joke_list_limit', 500)}`); } catch (_) { return; }
   const rows = body.rows || [];
   $('#joke-count').textContent = `${rows.length} keywords`;
   const tbody = $('#jokes-table tbody');
@@ -333,7 +342,7 @@ function renderLogsFull() {
 async function pollLogs(full) {
   if (activeTab !== 'status') return;
   let body;
-  try { body = await api('/api/logs?lines=1000'); } catch (_) { return; }
+  try { body = await api(`/api/logs?lines=${uiCfg.log_buffer_size || 1000}`); } catch (_) { return; }
   logCache = body.entries || [];
   $('#log-count').textContent = `${body.total} buffered`;
   if (full) { renderLogsFull(); return; }
@@ -343,7 +352,6 @@ async function pollLogs(full) {
 }
 
 $('#log-view').addEventListener('scroll', e => { logState.atBottom = e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 8; });
-setInterval(() => pollLogs(false), 2000);
 $('#btn-log-refresh').addEventListener('click', () => pollLogs(true));
 $('#log-level').addEventListener('change', e => { logState.minLevel = e.target.value; renderLogsFull(); });
 
@@ -404,7 +412,7 @@ async function selectRawTable(t) {
 async function loadRawRows() {
   if (!rawState.current) return;
   let body;
-  try { body = await api(`/api/db/table/${encodeURIComponent(rawState.current)}?limit=200`); } catch (_) { return; }
+  try { body = await api(`/api/db/table/${encodeURIComponent(rawState.current)}?limit=${uiOpt('page_size', 200)}`); } catch (_) { return; }
   const rows = body.rows || [];
   const cols = collectCols(rows);
   const table = $('#rows-table');
@@ -493,10 +501,16 @@ $$('.tab').forEach(btn => btn.addEventListener('click', () => {
   loadActiveTab();
 }));
 
-setInterval(refreshStatus, 5000);
-refreshStatus();
-loadCommands();
-loadIgnores();
-loadJokes();
-pollLogs(true);
-loadRawTables();
+async function boot() {
+  await loadConfig();
+  setInterval(refreshStatus, uiOpt('status_poll_ms', 5000));
+  setInterval(() => pollLogs(false), uiOpt('log_poll_ms', 2000));
+  refreshStatus();
+  loadCommands();
+  loadIgnores();
+  loadJokes();
+  pollLogs(true);
+  loadRawTables();
+}
+
+boot();

@@ -465,6 +465,7 @@ class DeezBot(CommandBot):
             "default_jemote": self.default_jemote,
             "channel_cache_ttl": self.channel_cache_ttl,
             "db_write_tables": list(self.db_write_tables),
+            "log_buffer_size": _log_handler.buffer.maxlen,
             "ui": self.ui_cfg,
         })
 
