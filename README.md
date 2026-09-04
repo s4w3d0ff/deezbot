@@ -29,7 +29,7 @@ chmod +x install.sh run.sh
 ./install.sh
 ```
 
-Creates a venv, installs dependencies (spacy, poolguy, aiosqlite, rich, click), and downloads the spaCy model.
+Creates a venv, installs dependencies (spacy, poolguy, aiosqlite, rich, pytest), and downloads the spaCy model.
 
 ## Configuration
 
@@ -60,12 +60,41 @@ Edit `cfg.json` for runtime settings:
 
 The bot starts, authenticates via Twitch OAuth (browser flow), subscribes to EventSub for channel chat messages, and begins processing. It auto-connects/disconnects from channels based on stream status.
 
+## Web UI & API
+
+While the bot runs it serves a local web control panel at `http://localhost:5000` — the same port as the OAuth callback (the server stays up in steady state now, instead of stopping after login).
+
+The UI is a static dark single page (`ui/`, served at `/`) with three tabs:
+
+- **Status** — auth state, token expiry countdown, websocket session indicator, channel list. Polls every 5 seconds.
+- **Test** — joke dry-run (runs keyword lookup + spaCy replacement without sending anything or touching joke counters) and a test chat box that sends a real message to the bot's own channel only, behind a confirm prompt.
+- **Database** — browse every table with row counts; edit cells in place on deezbot tables (`joke`, `ignore`, `channels`), per-row delete (prompts for the PK value), and a new-row form generated from existing columns. Framework tables are read-only through the API.
+
+JSON endpoints behind the UI:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/status` | auth state, token expiry, ws session, channels |
+| POST | `/api/test/joke` | `{message}` → keyword/spacy dry run, no side effects |
+| POST | `/api/test/chat` | `{message}` → real send to the bot's own channel, 400-char chunks |
+| GET | `/api/db/tables` | table names, row counts, writable flag |
+| GET | `/api/db/table/{table}?limit=200` | rows via storage query |
+| POST | `/api/db/table/{table}` | upsert insert (whitelist: `joke`, `ignore`, `channels`) |
+| DELETE | `/api/db/table/{table}` | delete by `where` + `params` (same whitelist) |
+
+The server binds localhost only — no auth layer, do not expose the port. Writes to framework tables (`tokens`, `queue`, eventsub internals) return 403; reads stay open for all tables.
+
 ## Structure
 
 ```
 deezbot/
 ├── src/                  # Python source code
 │   └── deez_nutz.py      # Bot logic (DeezBot + ChannelChatMessageAlert)
+├── test/                 # Offline API test suite (pytest, no network)
+├── ui/                   # Static web control panel (served at /)
+│   ├── index.html        # Single page shell
+│   ├── app.js            # Tabs: status, test chat/joke dry-run, db editor
+│   └── style.css         # Dark compact theme
 ├── cfg.json              # Runtime configuration
 ├── db/                   # Runtime data (gitignored)
 │   └── twitch.db         # SQLite storage (tokens, jokes, channels, ignores)
