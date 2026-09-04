@@ -123,6 +123,7 @@ class DeezBot(CommandBot):
             for key, joke in jokes.items():
                 if key in message.lower():
                     self._resetjcount()
+                    self.lastjoke = time.time()
                     return f"{joke}! {emote}"
         # make random joke
         if self.jcount >= self.jcountmax:
@@ -130,6 +131,7 @@ class DeezBot(CommandBot):
             r = replace_random_noun_chunk(message, "deez nutz")
             if r:
                 self._resetjcount()
+                self.lastjoke = time.time()
                 return f"{r} {emote}"
 
     async def _update_user_ignore(self, user_id, ignore):

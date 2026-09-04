@@ -3,6 +3,7 @@ import sys
 import socket
 import asyncio
 import logging
+import random
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -218,6 +219,24 @@ def test_logs_endpoint(tmp_path):
         run_test(bot, probe)
     finally:
         root.setLevel(old_level)
+
+
+def test_makejoke_keyword_cooldown(tmp_path):
+    bot = make_bot(str(tmp_path))
+    bot.jdelay = (50, 60)
+    bot.jcountmax = random.randint(*bot.jdelay)
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
+
+    async def probe():
+        data1 = {'message': {'text': 'my fitness journey'}, 'broadcaster_user_id': '4000001'}
+        r1 = await bot.makeJoke(data1)
+        assert r1 is not None and 'dick fit' in r1
+        assert bot.lastjoke > 0, 'keyword joke did not record lastjoke timestamp'
+        data2 = {'message': {'text': 'my fitness journey'}, 'broadcaster_user_id': '4000001'}
+        r2 = await bot.makeJoke(data2)
+        assert r2 is None, f'keyword cooldown violated: {r2}'
+
+    asyncio.run(probe())
 
 
 def test_joke_keyword_hit(tmp_path):
