@@ -1,0 +1,34 @@
+# deezbot runtime configuration
+# Sensitive credentials (DEEZ_CLIENT_ID / DEEZ_CLIENT_SECRET) come from .env, never here.
+
+scopes:
+  - user:read:chat
+  - user:write:chat
+channels:
+  channel.chat.message: null
+storage: sqlite
+browser: firefox          # browser used to open the Twitch OAuth page (omit for system default)
+
+jdelay: [10, 20]          # random-joke count window per cycle (min, max)
+jlimit: 600               # seconds between keyword jokes (cooldown window)
+loop_delay: 300           # seconds between connection health checks
+default_jemote: Kappa     # jemote used when a channel has none stored
+
+web:
+  host: localhost         # control panel + OAuth callback bind host
+  port: 5000              # control panel + OAuth callback port
+  static_dirs: [ui]       # directories served at /<dir>/... by the web server
+  log_buffer_size: 1000   # in-process service log ring buffer capacity (lines)
+
+enrichment:
+  channel_cache_ttl: 60   # seconds to cache users/streams enrichment for channels + status
+
+spacy_model: en_core_web_sm
+
+db_write_tables: [joke, ignore, channels]   # tables writable via /api/db/table (rest read-only)
+
+ui:
+  status_poll_ms: 5000    # how often the Status tab polls /api/status
+  log_poll_ms: 2000       # how often the Service Log fetches new lines
+  page_size: 200          # rows per table view in the DB browser
+  joke_list_limit: 500    # max keywords loaded into the Jokes editor
