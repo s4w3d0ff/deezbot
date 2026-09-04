@@ -9,6 +9,7 @@ from poolguy import CommandBot, Alert, rate_limit, command, route
 from config import loadYAML, DEFAULT_WRITE_TABLES
 from logbuffer import _log_handler, LOG_MAXLEN
 from jokes import configure_spacy, replace_random_noun_chunk, DEFAULT_SPACY_MODEL
+from alerts import ChannelChatMessageAlert
 
 logger = logging.getLogger(__name__)
 
@@ -20,27 +21,6 @@ def _ignore_truthy(val):
     if val is None:
         return False
     return str(val).strip().lower() not in ('0', 'false', '')
-
-
-class ChannelChatMessageAlert(Alert):
-    store = False
-    queue_skip = True
-    """channel.chat.message"""
-    async def process(self):
-        if int(self.bot.http.user_id) == int(self.data["chatter_user_id"]):
-            return
-        if await self.bot.command_check(self.data):
-            return
-        if await self.bot._get_ignore_status(self.data["chatter_user_id"]):
-            return
-        try:
-            r = await self.bot.makeJoke(self.data)
-            if r:
-                m = await self.bot.send_chat(r, self.data["broadcaster_user_id"])
-                logger.info(f'{self.data["broadcaster_user_login"]}: {r} {m}')
-        except:
-            logger.exception(f"Error in process_message():\n")
-            raise
 
 
 class DeezBot(CommandBot):
