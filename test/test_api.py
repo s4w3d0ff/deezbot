@@ -173,6 +173,80 @@ def test_status_channel_counts(tmp_path):
     run_test(bot, probe)
 
 
+def test_status_joke_state(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
+    import time as _time
+    bot.lastjoke = _time.time() - 5
+
+    async def probe(client):
+        body = await (await client.get('/api/status')).json()
+        js = body['joke_state']
+        assert js['cooldown_seconds'] == bot.jlimit
+        assert 4 <= js['seconds_since_last_joke'] <= 6
+        assert 0 < js['keyword_cooldown_remaining'] <= bot.jlimit - 5 + 1
+        assert js['random_counter'] == 0 and js['random_next_at'] >= 1
+
+    run_test(bot, probe)
+
+
+def test_add_channel_resolves_login(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def fake_get_users(ids=None, logins=None):
+        if logins == ['newstreamer']:
+            return [{'id': '6000001', 'login': 'newstreamer', 'display_name': 'NewStreamer'}]
+        return []
+
+    bot.http.getUsers = fake_get_users
+
+    async def probe(client):
+        r = await client.post('/api/channels', json={})
+        assert r.status == 400
+
+        r = await client.post('/api/channels', json={'login': 'ghostuser'})
+        assert r.status == 404
+
+        r = await client.post('/api/channels', json={'login': '@newstreamer', 'jemote': 'POG'})
+        assert r.status == 200
+        body = await r.json()
+        assert body['added'] == {'user_id': '6000001', 'login': 'newstreamer'}
+
+        rows = (await (await client.get('/api/db/table/channels')).json())['rows']
+        match = [row for row in rows if row['user_id'] == '6000001']
+        assert len(match) == 1 and match[0]['jemote'] == 'POG'
+
+    run_test(bot, probe)
+
+
+def test_add_ignore_resolves_login(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def fake_get_users(ids=None, logins=None):
+        if '7000001' in [str(i) for i in (ids or [])] + [str(l) for l in (logins or [])]:
+            return [{'id': '7000001', 'login': 'spammy', 'display_name': 'SpamLord'}]
+        if logins == ['spammy']:
+            return [{'id': '7000001', 'login': 'spammy', 'display_name': 'SpamLord'}]
+        return []
+
+    bot.http.getUsers = fake_get_users
+
+    async def probe(client):
+        r = await client.post('/api/ignores', json={})
+        assert r.status == 400
+        r = await client.post('/api/ignores', json={'login': 'ghostuser'})
+        assert r.status == 404
+
+        r = await client.post('/api/ignores', json={'login': 'spammy'})
+        assert r.status == 200
+
+        body = (await (await client.get('/api/ignores')).json())
+        by_id = {u['user_id']: u for u in body['users']}
+        assert by_id['7000001']['ignored'] is True and by_id['7000001']['login'] == 'spammy'
+
+    run_test(bot, probe)
+
+
 def test_commands_listing(tmp_path):
     bot = make_bot(str(tmp_path))
 

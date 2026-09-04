@@ -39,6 +39,11 @@ logging.getLogger().addHandler(_LOG_HANDLER)
 def jerr(data, status):
     return aweb.json_response(data, status=status)
 
+def _ignore_truthy(val):
+    if val is None:
+        return False
+    return str(val).strip().lower() not in ('0', 'false', '')
+
 nlp = spacy.load("en_core_web_sm")
 
 def replace_random_noun_chunk(text, replacement="these walnuts"):
@@ -140,7 +145,7 @@ class DeezBot(CommandBot):
     async def _get_ignore_status(self, user_id):
         r = await self.storage.query("ignore", where="user_id = ?", params=(user_id,))
         try:
-            return r[0]["ignore"]
+            return _ignore_truthy(r[0]["ignore"])
         except:
             return False
 
@@ -302,6 +307,9 @@ class DeezBot(CommandBot):
         live_count = sum(1 for c in chans.values() if c.get('is_live'))
         ignores_total = len(await self.storage.query("ignore"))
         jokes_total = len(await self._get_jokes())
+        now = time.time()
+        seconds_since_last_joke = int(now - self.lastjoke) if self.lastjoke else None
+        keyword_cooldown_remaining = max(0, int(self.jlimit - (now - self.lastjoke))) if self.lastjoke else 0
         return self.app.response_json({
             "authenticated": bool(self.http.user_id),
             "user_id": str(self.http.user_id) if self.http.user_id else None,
@@ -313,6 +321,13 @@ class DeezBot(CommandBot):
             "channels_live": live_count,
             "ignores_total": ignores_total,
             "jokes_total": jokes_total,
+            "joke_state": {
+                "cooldown_seconds": self.jlimit,
+                "seconds_since_last_joke": seconds_since_last_joke,
+                "keyword_cooldown_remaining": keyword_cooldown_remaining,
+                "random_counter": self.jcount,
+                "random_next_at": self.jcountmax,
+            },
         })
 
     @route('/api/channels')
@@ -326,6 +341,20 @@ class DeezBot(CommandBot):
             "channels": rows,
         })
 
+    @route('/api/channels', method='POST')
+    async def api_channels_add(self, request):
+        body = await request.json()
+        login = (body.get('login') or '').strip().lstrip('@')
+        if not login:
+            return jerr({"status": False, "error": "missing 'login'"}, 400)
+        users = await self.http.getUsers(logins=[login])
+        if not users:
+            return jerr({"status": False, "error": f"twitch user '{login}' not found"}, 404)
+        u = users[0]
+        await self.storage.insert("channels", {"user_id": str(u['id']), "jemote": body.get('jemote') or 'Kappa'})
+        logger.info(f"UI added channel {u['login']} ({u['id']})")
+        return self.app.response_json({"status": True, "added": {"user_id": u['id'], "login": u['login']}})
+
     @route('/api/ignores')
     async def api_ignores(self, request):
         rows = await self.storage.query("ignore")
@@ -334,8 +363,22 @@ class DeezBot(CommandBot):
         for r in rows:
             uid = r['user_id']
             info = users.get(uid, {'login': None, 'display_name': None})
-            out.append({'user_id': uid, **info, 'ignored': bool(r.get('ignore', True))})
+            out.append({'user_id': uid, **info, 'ignored': _ignore_truthy(r.get('ignore'))})
         return self.app.response_json({"status": True, "total": len(out), "users": out})
+
+    @route('/api/ignores', method='POST')
+    async def api_ignores_add(self, request):
+        body = await request.json()
+        login = (body.get('login') or '').strip().lstrip('@')
+        if not login:
+            return jerr({"status": False, "error": "missing 'login'"}, 400)
+        users = await self.http.getUsers(logins=[login])
+        if not users:
+            return jerr({"status": False, "error": f"twitch user '{login}' not found"}, 404)
+        u = users[0]
+        await self._update_user_ignore(str(u['id']), True)
+        logger.info(f"UI ignored user {u['login']} ({u['id']})")
+        return self.app.response_json({"status": True, "ignored": {"user_id": u['id'], "login": u['login']}})
 
     @route('/api/commands')
     async def api_commands(self, request):
