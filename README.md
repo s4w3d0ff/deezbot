@@ -120,11 +120,25 @@ The server binds localhost only — no auth layer, do not expose the port. Write
 ```
 deezbot/
 ├── src/                  # Python source code
-│   └── deez_nutz.py      # Bot logic (DeezBot + ChannelChatMessageAlert)
+│   ├── bot.py            # DeezBot hub: mixin composition, joke state, storage helpers
+│   ├── alerts.py         # ChannelChatMessageAlert (chat message handler)
+│   ├── commands.py       # CommandsMixin (jemote/join/leave/ignore/unignore)
+│   ├── config.py         # YAML loader + default writable tables
+│   ├── jokes.py          # spacy noun-chunk joke engine
+│   ├── logbuffer.py      # ring-buffer logging handler for the service log viewer
+│   ├── web_api.py        # WebApiMixin (status/channels/ignores/test routes)
+│   ├── web_db.py         # WebDbMixin (raw database editor routes)
+│   └── web_manage.py     # WebManageMixin (log/config endpoints, service loop)
 ├── test/                 # Offline API test suite (pytest, no network)
 ├── ui/                   # Static web control panel (served at /)
 │   ├── index.html        # Single page shell
-│   ├── app.js            # Tabs: status (+log, raw db), channels, ignore list, jokes
+│   ├── app.js            # Tab switching + boot
+│   ├── js/api.js         # Shared helpers: dom, toast, api calls, config, formatters
+│   ├── js/status.js      # Status tab: KPIs, joke state, commands, log viewer
+│   ├── js/channels.js    # Channels tab
+│   ├── js/ignores.js     # Ignore list tab
+│   ├── js/jokes.js       # Jokes tab (dry-run, test chat, keyword editor)
+│   ├── js/rawdb.js       # Raw database browser
 │   └── style.css         # Dark compact theme
 ├── cfg.yaml              # Runtime configuration (YAML)
 ├── db/                   # Runtime data (gitignored)

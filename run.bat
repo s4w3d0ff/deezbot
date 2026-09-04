@@ -7,7 +7,7 @@ set DEEZ_CLIENT_ID=
 set DEEZ_CLIENT_SECRET=
 
 echo Running deez_nuts.py...
-python src\deez_nutz.py
+python src\bot.py
 
 echo Deactivating virtual environment...
 call deez_venv\Scripts\deactivate
