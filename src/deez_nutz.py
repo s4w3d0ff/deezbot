@@ -4,7 +4,6 @@ import logging
 import time
 import os
 import aiosqlite
-from aiohttp import web as aweb
 from poolguy import CommandBot, route
 from config import loadYAML, DEFAULT_WRITE_TABLES
 from logbuffer import _log_handler, LOG_MAXLEN
@@ -12,11 +11,12 @@ from jokes import configure_spacy, replace_random_noun_chunk, DEFAULT_SPACY_MODE
 from alerts import ChannelChatMessageAlert
 from commands import CommandsMixin
 from web_api import WebApiMixin, jerr, _ignore_truthy
+from web_manage import WebManageMixin
 
 logger = logging.getLogger(__name__)
 
 
-class DeezBot(CommandBot, CommandsMixin, WebApiMixin):
+class DeezBot(CommandBot, CommandsMixin, WebApiMixin, WebManageMixin):
     def __init__(self, cfg=None, *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
@@ -157,36 +157,6 @@ class DeezBot(CommandBot, CommandsMixin, WebApiMixin):
     #===================================================================================
     # Web UI + API ================================================================
     #===================================================================================
-    @route('/api/logs')
-    async def api_logs(self, request):
-        lines = int(request.query.get('lines') or 200)
-        lines = max(1, min(lines, LOG_MAXLEN))
-        buf = _log_handler.buffer
-        entries = list(buf)[-lines:]
-        return self.app.response_json({
-            "status": True,
-            "total": len(buf),
-            "oldest_seq": buf[0]['seq'] if buf else None,
-            "newest_seq": buf[-1]['seq'] if buf else None,
-            "entries": entries,
-        })
-
-    @route('/api/config')
-    async def api_config(self, request):
-        return self.app.response_json({
-            "status": True,
-            "web_host": self.web_host,
-            "web_port": self.web_port,
-            "jdelay": self.jdelay,
-            "jlimit": self.jlimit,
-            "loop_delay": self.loop_delay,
-            "default_jemote": self.default_jemote,
-            "channel_cache_ttl": self.channel_cache_ttl,
-            "db_write_tables": list(self.db_write_tables),
-            "log_buffer_size": _log_handler.buffer.maxlen,
-            "ui": self.ui_cfg,
-        })
-
     @route('/api/db/tables')
     async def api_db_tables(self, request):
         tables = []
@@ -237,30 +207,6 @@ class DeezBot(CommandBot, CommandsMixin, WebApiMixin):
         await self.storage.delete(table, where=where, params=params)
         logger.info(f"UI db delete from {table}: {where} {params}")
         return self.app.response_json({"status": True, "deleted_from": table})
-
-    #===================================================================================
-    #===================================================================================
-    async def before_login(self):
-        if not self.app.is_running():
-            self.app.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.app.static_dirs = list(getattr(self, 'web_static_dirs', None) or ['ui'])
-            await self.app.start()
-
-    async def after_login(self):
-        await self.add_task(self.deez_loop)
-        
-    async def deez_loop(self):
-        logger.debug(f'deez_loop started')
-        await asyncio.sleep(5)
-        while self.loop_delay:
-            try:
-                await self.check_connections()
-            except Exception as e:
-                logger.error("deez_loop Error:\n{e}")
-            await asyncio.sleep(self.loop_delay)
-        logger.warning(f'deez_loop stopped')
-    #===================================================================================
-    #===================================================================================
 
     async def connected_channels(self):
         r = await self.http.getEventSubs(status='enabled')
