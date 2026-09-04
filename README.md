@@ -66,18 +66,20 @@ While the bot runs it serves a local web control panel at `http://localhost:5000
 
 The UI is a static dark single page (`ui/`, served at `/`) with four tabs:
 
-- **Status** — bot account, uptime, token expiry countdown, websocket indicator, KPI counts (connected/live channels, ignored users, jokes), per-channel table enriched with login/display name from the Twitch API (60s cache) plus live dot, viewers and stream title, and the bot's registered command list. Polls every 5 seconds.
-- **Test** — joke dry-run (runs keyword lookup + spaCy replacement without sending anything or touching joke counters) and a test chat box that sends a real message to the bot's own channel only, behind a confirm prompt.
-- **Data** — joke keywords with inline edit/add/delete; ignore list enriched with each user's login/display name plus unignore/remove actions; channel jemote editor with leave action; raw database browser (edit cells in place on deezbot tables `joke`, `ignore`, `channels`, per-row delete, new-row form generated from existing columns). Framework tables are read-only through the API.
-- **Log** — live service log (last 1000 entries kept in-process), level filter, auto-scroll while pinned to bottom, manual refresh. Polls every 2 seconds while open.
+- **Status** — bot account, uptime, token expiry countdown, websocket indicator, KPI counts (connected/live channels, ignored users, jokes) plus live joke state (cooldown window, seconds since last fire, remaining keyword cooldown, random counter vs next threshold), the bot's registered command list, the service log viewer, and the raw database browser. Status polls every 5 seconds; the log poll is a separate 2-second cycle while the tab is open.
+- **Channels** — connected channels with live dot, viewers and stream title per channel (enriched via the Twitch users/streams APIs, 60s cache), inline jemote editing, remove button, and an add form that resolves a twitch username to its user id before writing the row.
+- **Ignore List** — ignored users enriched with login/display name; unignore toggles the flag back off without deleting history, remove deletes the row; add form resolves a twitch username the same way as Channels (writes `ignore=1`, matching the chat command).
+- **Jokes** — joke dry-run and own-channel test chat on top of the keyword editor with inline edit/add/delete. Live joke-state KPIs are shown on the Status tab so they stay visible while watching logs.
 
 JSON endpoints behind the UI:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/status` | bot account/username, uptime, token expiry, ws session, connected/live channel counts, ignore/joke totals |
+| GET | `/api/status` | bot account/username, uptime, token expiry, ws session, connected/live channel counts, ignore/joke totals, live joke state (cooldown + counters) |
 | GET | `/api/channels` | per-channel detail enriched with login, display name, live state, viewers, stream title (60s cache) |
-| GET | `/api/ignores` | ignore list rows enriched with user login/display name |
+| POST | `/api/channels` | `{login, jemote?}` → resolve user via users API and add channel row; 404 on unknown user |
+| GET | `/api/ignores` | ignore list rows enriched with user login/display name and effective `ignored` flag |
+| POST | `/api/ignores` | `{login}` → resolve user and set `ignore=1`; 404 on unknown user |
 | GET | `/api/commands` | registered bot commands with aliases and help text |
 | GET | `/api/logs?lines=200` | in-process log ring buffer (max 1000) tail, `oldest_seq`/`newest_seq` for incremental polling |
 | POST | `/api/test/joke` | `{message}` → keyword/spacy dry run, no side effects |
@@ -98,7 +100,7 @@ deezbot/
 ├── test/                 # Offline API test suite (pytest, no network)
 ├── ui/                   # Static web control panel (served at /)
 │   ├── index.html        # Single page shell
-│   ├── app.js            # Tabs: status, test chat/joke dry-run, db editor
+│   ├── app.js            # Tabs: status (+log, raw db), channels, ignore list, jokes
 │   └── style.css         # Dark compact theme
 ├── cfg.json              # Runtime configuration
 ├── db/                   # Runtime data (gitignored)
