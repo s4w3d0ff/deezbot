@@ -2,6 +2,7 @@ import os
 import sys
 import socket
 import asyncio
+import logging
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -13,6 +14,8 @@ from aiohttp.test_utils import TestClient, TestServer
 from poolguy.core.storage import SQLiteStorage
 
 import deez_nutz
+
+logger = logging.getLogger('deeztest')
 
 
 def freeport():
@@ -186,6 +189,35 @@ def test_commands_listing(tmp_path):
         assert body['total'] == len(body['commands'])
 
     run_test(bot, probe)
+
+
+def test_logs_endpoint(tmp_path):
+    bot = make_bot(str(tmp_path))
+    root = logging.getLogger()
+    old_level = root.level
+    root.setLevel(logging.DEBUG)
+    try:
+        logger.info('first probe line')
+        logger.warning('second warning line')
+
+        async def probe(client):
+            r = await client.get('/api/logs?lines=10')
+            assert r.status == 200
+            body = await r.json()
+            assert body['total'] >= 2
+            msgs = [e['msg'] for e in body['entries']]
+            assert 'first probe line' in msgs and 'second warning line' in msgs
+            by_msg = {e['msg']: e for e in body['entries']}
+            assert by_msg['second warning line']['level'] == 'WARNING'
+            assert body['newest_seq'] >= body['oldest_seq']
+
+            r = await client.get('/api/logs?lines=1')
+            body = (await r.json())
+            assert len(body['entries']) == 1
+
+        run_test(bot, probe)
+    finally:
+        root.setLevel(old_level)
 
 
 def test_joke_keyword_hit(tmp_path):

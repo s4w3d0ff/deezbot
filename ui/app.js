@@ -401,12 +401,60 @@ $('#new-row-form').addEventListener('submit', async e => {
 });
 
 let activeTab = 'status';
+const LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+let logCache = [];
+let logState = { minLevel: '', lastSeq: 0, atBottom: true };
+
+function levelPass(entry) {
+  if (!logState.minLevel) return true;
+  return LOG_LEVELS.indexOf(entry.level) >= LOG_LEVELS.indexOf(logState.minLevel);
+}
+
+function logLineText(e) {
+  return `${e.ts} ${e.level.padEnd(7)} [${e.name}] ${e.msg}`;
+}
+
+function appendLogLines(entries) {
+  const view = $('#log-view');
+  for (const e of entries) {
+    if (!levelPass(e)) continue;
+    view.append(el('span', logLineText(e), `log-line log-${e.level.toLowerCase()}`), '\n');
+  }
+  if (logState.atBottom) view.scrollTop = view.scrollHeight;
+}
+
+function renderLogsFull() {
+  const view = $('#log-view');
+  view.replaceChildren();
+  appendLogLines(logCache);
+  logState.lastSeq = logCache.length ? logCache[logCache.length - 1].seq : 0;
+}
+
+async function pollLogs(full) {
+  if (activeTab !== 'log') return;
+  let body;
+  try { body = await api('/api/logs?lines=1000'); } catch (_) { return; }
+  logCache = body.entries || [];
+  $('#log-count').textContent = `${body.total} buffered`;
+  if (full) { renderLogsFull(); return; }
+  const fresh = logCache.filter(e => e.seq > logState.lastSeq);
+  appendLogLines(fresh);
+  if (fresh.length) logState.lastSeq = fresh[fresh.length - 1].seq;
+}
+
+$('#log-view').addEventListener('scroll', e => { logState.atBottom = e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 8; });
+setInterval(() => pollLogs(false), 2000);
+$('#btn-log-refresh').addEventListener('click', () => pollLogs(true));
+$('#log-level').addEventListener('change', e => { logState.minLevel = e.target.value; renderLogsFull(); });
+
 function loadActiveTab() {
   if (activeTab === 'data') {
     loadJokes();
     loadIgnores();
     loadDataChannels();
     loadRawTables();
+  } else if (activeTab === 'log') {
+    pollLogs(true);
   }
 }
 

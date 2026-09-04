@@ -5,6 +5,7 @@ import logging
 import time
 import os
 from collections import deque
+import itertools
 import aiosqlite
 from aiohttp import web as aweb
 from poolguy.core.storage import loadJSON
@@ -15,6 +16,24 @@ logger = logging.getLogger(__name__)
 WRITE_TABLES = ('joke', 'ignore', 'channels')
 
 CHANNEL_CACHE_TTL = 60
+
+LOG_BUFFER = deque(maxlen=1000)
+_log_seq_counter = itertools.count(1)
+
+
+class LogBufferHandler(logging.Handler):
+    def emit(self, record):
+        LOG_BUFFER.append({
+            'seq': next(_log_seq_counter),
+            'ts': time.strftime('%H:%M:%S', time.localtime(record.created)),
+            'level': logging.getLevelName(record.levelno),
+            'name': record.name,
+            'msg': record.getMessage(),
+        })
+
+
+_LOG_HANDLER = LogBufferHandler()
+logging.getLogger().addHandler(_LOG_HANDLER)
 
 
 def jerr(data, status):
@@ -327,6 +346,19 @@ class DeezBot(CommandBot):
                 continue
             out.append({'name': name, 'aliases': cmd.get('aliases') or [], 'help': (cmd.get('help') or '').strip()})
         return self.app.response_json({"status": True, "total": len(out), "commands": out})
+
+    @route('/api/logs')
+    async def api_logs(self, request):
+        lines = int(request.query.get('lines') or 200)
+        lines = max(1, min(lines, 1000))
+        entries = list(LOG_BUFFER)[-lines:]
+        return self.app.response_json({
+            "status": True,
+            "total": len(LOG_BUFFER),
+            "oldest_seq": LOG_BUFFER[0]['seq'] if LOG_BUFFER else None,
+            "newest_seq": LOG_BUFFER[-1]['seq'] if LOG_BUFFER else None,
+            "entries": entries,
+        })
 
     @route('/api/test/joke', method='POST')
     async def api_test_joke(self, request):

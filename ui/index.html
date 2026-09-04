@@ -15,6 +15,7 @@
     <button data-tab="status" class="tab active">Status</button>
     <button data-tab="test" class="tab">Test</button>
     <button data-tab="data" class="tab">Data</button>
+    <button data-tab="log" class="tab">Log</button>
   </nav>
 </header>
 
@@ -83,6 +84,21 @@
         <div class="table-wrap"><table id="rows-table"></table></div>
       </div>
     </div>
+  </section>
+
+  <section id="tab-log" class="pane">
+    <div class="row db-toolbar">
+      <span class="muted">service log</span>
+      <select id="log-level">
+        <option value="">all levels</option>
+        <option value="INFO">info and up</option>
+        <option value="WARNING">warning and up</option>
+        <option value="ERROR">error and up</option>
+      </select>
+      <button id="btn-log-refresh" class="primary">refresh</button>
+      <span id="log-count" class="muted"></span>
+    </div>
+    <pre id="log-view" class="logview"></pre>
   </section>
 </main>
 
