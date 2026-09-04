@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deezbot</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header>
+  <span class="logo">deezbot</span>
+  <span id="ws-dot" class="dot off" title="websocket session"></span>
+  <nav>
+    <button data-tab="status" class="tab active">Status</button>
+    <button data-tab="test" class="tab">Test</button>
+    <button data-tab="database" class="tab">Database</button>
+  </nav>
+</header>
+
+<main>
+  <section id="tab-status" class="pane active">
+    <div class="grid" id="status-grid"></div>
+    <h3>Channels (jemotes)</h3>
+    <div class="table-wrap"><table id="channels-table"><thead><tr><th>user_id</th><th>jemote</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section id="tab-test" class="pane">
+    <h3>Joke dry-run <span class="muted">(no message sent, no counter change)</span></h3>
+    <input type="text" id="joke-input" placeholder='chat message to test, e.g. "my fitness journey"'>
+    <div class="row">
+      <button id="btn-joke" class="primary">Dry-run joke</button>
+      <span id="joke-out"></span>
+    </div>
+
+    <h3>Test chat <span class="muted">(real message, sent to the bot's own channel only)</span></h3>
+    <textarea id="chat-input" rows="2" placeholder="message to send in your own channel"></textarea>
+    <div class="row">
+      <button id="btn-chat" class="danger">Send test chat</button>
+      <span id="chat-out"></span>
+    </div>
+  </section>
+
+  <section id="tab-database" class="pane">
+    <div class="db-layout">
+      <aside><ul id="table-list"></ul></aside>
+      <div class="db-main">
+        <div class="row db-toolbar">
+          <span id="db-title" class="muted"></span>
+          <button id="btn-new-row" hidden>New row</button>
+        </div>
+        <form id="new-row-form" class="hidden"></form>
+        <div class="table-wrap"><table id="rows-table"></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/ui/app.js"></script>
+</body>
+</html>
