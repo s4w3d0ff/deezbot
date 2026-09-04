@@ -460,3 +460,51 @@ def test_chat_chunking_400_chars(tmp_path):
         assert all(len(c) <= 500 for c in chunks)
 
     run_test(bot, probe)
+
+
+def test_config_endpoint(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        r = await client.get('/api/config')
+        assert r.status == 200
+        body = await r.json()
+        assert body['status'] is True
+        assert body['web_host'] == 'localhost'
+        assert body['web_port'] == 5000
+        assert body['jdelay'] == [1, 2]
+        assert body['loop_delay'] == 3600
+        assert body['default_jemote'] == 'Kappa'
+        assert 'joke' in body['db_write_tables']
+        assert body['log_buffer_size'] >= 1
+
+    run_test(bot, probe)
+
+
+def test_config_sections_from_yaml(tmp_path):
+    bot = deez_nutz.DeezBot(cfg={
+        'scopes': ['user:read:chat', 'user:write:chat'],
+        'channels': {'channel.chat.message': None},
+        'storage': SQLiteStorage(os.path.join(str(tmp_path), 'twitch.db')),
+        'spacy_model': deez_nutz.DEFAULT_SPACY_MODEL,
+        'jdelay': [7, 9],
+        'jlimit': 321,
+        'loop_delay': 61,
+        'default_jemote': 'Peekaboo',
+        'enrichment': {'channel_cache_ttl': 42},
+        'web': {'host': '127.0.0.1', 'port': 5931, 'static_dirs': ['ui'], 'log_buffer_size': 55},
+        'db_write_tables': ['joke'],
+        'ui': {'status_poll_ms': 1234, 'log_poll_ms': 777},
+    })
+
+    assert bot.web_host == '127.0.0.1'
+    assert bot.web_port == 5931
+    assert bot.web_static_dirs == ['ui']
+    assert deez_nutz._log_handler.buffer.maxlen == 55
+    assert bot.jdelay == [7, 9]
+    assert bot.jlimit == 321
+    assert bot.loop_delay == 61
+    assert bot.default_jemote == 'Peekaboo'
+    assert bot.channel_cache_ttl == 42.0
+    assert bot.db_write_tables == ('joke',)
+    assert bot.ui_cfg['status_poll_ms'] == 1234
