@@ -3,20 +3,20 @@ import asyncio
 import logging
 import time
 import os
-import aiosqlite
-from poolguy import CommandBot, route
+from poolguy import CommandBot
 from config import loadYAML, DEFAULT_WRITE_TABLES
 from logbuffer import _log_handler, LOG_MAXLEN
 from jokes import configure_spacy, replace_random_noun_chunk, DEFAULT_SPACY_MODEL
 from alerts import ChannelChatMessageAlert
 from commands import CommandsMixin
-from web_api import WebApiMixin, jerr, _ignore_truthy
+from web_api import WebApiMixin, _ignore_truthy
 from web_manage import WebManageMixin
+from web_db import WebDbMixin
 
 logger = logging.getLogger(__name__)
 
 
-class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, CommandBot):
+class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot):
     def __init__(self, cfg=None, *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
@@ -153,60 +153,6 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, CommandBot):
         except Exception as e:
             logger.warning(f"Ignore list username enrichment failed: {e}")
         return users
-    
-    #===================================================================================
-    # Web UI + API ================================================================
-    #===================================================================================
-    @route('/api/db/tables')
-    async def api_db_tables(self, request):
-        tables = []
-        async with aiosqlite.connect(self.storage.db_path) as db:
-            async with db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name") as cur:
-                names = [row[0] async for row in cur]
-            for name in names:
-                clean = self.storage._clean_str(name)
-                async with db.execute(f'SELECT count(*) FROM {clean}') as cur:
-                    row = await cur.fetchone()
-                tables.append({
-                    "name": name,
-                    "row_count": row[0] if row else 0,
-                    "writable": clean in self.db_write_tables,
-                })
-        return self.app.response_json({"status": True, "tables": tables})
-
-    @route('/api/db/table/{table}')
-    async def api_db_table(self, request):
-        table = self.storage._clean_str(request.match_info['table'])
-        limit = int(request.query.get('limit') or 200)
-        rows = await self.storage.query(table)
-        return self.app.response_json({"status": True, "table": table, "rows": rows[:limit]})
-
-    @route('/api/db/table/{table}', method='POST')
-    async def api_db_table_insert(self, request):
-        table = self.storage._clean_str(request.match_info['table'])
-        if table not in self.db_write_tables:
-            return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
-        body = await request.json()
-        data = {k: str(v) for k, v in body.items()} if isinstance(body, dict) else {}
-        if not data:
-            return jerr({"status": False, "error": "empty row payload"}, 400)
-        await self.storage.insert(table, data)
-        logger.info(f"UI db insert into {table}: {data}")
-        return self.app.response_json({"status": True, "inserted": data})
-
-    @route('/api/db/table/{table}', method='DELETE')
-    async def api_db_table_delete(self, request):
-        table = self.storage._clean_str(request.match_info['table'])
-        if table not in self.db_write_tables:
-            return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
-        body = await request.json()
-        where = (body or {}).get('where')
-        params = tuple(body.get('params') or ())
-        if not where:
-            return jerr({"status": False, "error": "missing 'where' clause"}, 400)
-        await self.storage.delete(table, where=where, params=params)
-        logger.info(f"UI db delete from {table}: {where} {params}")
-        return self.app.response_json({"status": True, "deleted_from": table})
 
     async def connected_channels(self):
         r = await self.http.getEventSubs(status='enabled')
