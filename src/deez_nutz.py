@@ -16,7 +16,7 @@ from web_manage import WebManageMixin
 logger = logging.getLogger(__name__)
 
 
-class DeezBot(CommandBot, CommandsMixin, WebApiMixin, WebManageMixin):
+class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, CommandBot):
     def __init__(self, cfg=None, *args, **kwargs):
         # Fetch sensitive data from environment variables
         client_id = os.getenv("DEEZ_CLIENT_ID")
