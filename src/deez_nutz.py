@@ -4,45 +4,13 @@ import asyncio
 import logging
 import time
 import os
-from collections import deque
-import itertools
 import aiosqlite
-import yaml
 from aiohttp import web as aweb
 from poolguy import CommandBot, Alert, rate_limit, command, route
+from config import loadYAML, DEFAULT_WRITE_TABLES
+from logbuffer import _log_handler, LOG_MAXLEN
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_WRITE_TABLES = ('joke', 'ignore', 'channels')
-LOG_MAXLEN = 1000
-
-
-def loadYAML(filename):
-    with open(filename) as f:
-        return yaml.safe_load(f) or {}
-
-
-class LogBufferHandler(logging.Handler):
-    def __init__(self, maxlen=LOG_MAXLEN):
-        super().__init__()
-        self.buffer = deque(maxlen=maxlen)
-        self._seq = itertools.count(1)
-
-    def resize(self, maxlen):
-        self.buffer = deque(self.buffer, maxlen=maxlen)
-
-    def emit(self, record):
-        self.buffer.append({
-            'seq': next(self._seq),
-            'ts': time.strftime('%H:%M:%S', time.localtime(record.created)),
-            'level': logging.getLevelName(record.levelno),
-            'name': record.name,
-            'msg': record.getMessage(),
-        })
-
-
-_log_handler = LogBufferHandler()
-logging.getLogger().addHandler(_log_handler)
 
 DEFAULT_SPACY_MODEL = 'en_core_web_sm'
 _nlp = None
