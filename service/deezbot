@@ -14,4 +14,4 @@ fi
 
 export PYTHONPATH="$SCRIPT_DIR/deez_venv/lib/python3.14/site-packages:$PYTHONPATH"
 
-exec -a deezbot "$SCRIPT_DIR/deez_venv/bin/python3" "$SCRIPT_DIR/src/deez_nutz.py"
+exec -a deezbot "$SCRIPT_DIR/deez_venv/bin/python3" "$SCRIPT_DIR/src/bot.py"
