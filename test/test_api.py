@@ -267,6 +267,19 @@ def test_commands_listing(tmp_path):
     run_test(bot, probe)
 
 
+def test_cmd_prefix_configured_and_default(tmp_path):
+    custom = deezbot.DeezBot(
+        cfg={'cmd_prefix': ['?'], 'scopes': [], 'channels': {'channel.chat.message': None}},
+        storage=SQLiteStorage(os.path.join(str(tmp_path), 'twitch.db')),
+    )
+    assert custom.cmd_prefix == ['?']
+    assert custom._prefix == ['?']
+
+    default = make_bot(str(tmp_path))
+    assert default.cmd_prefix == ['!', '~']
+    assert default._prefix == ['!', '~']
+
+
 def test_logs_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
     root = logging.getLogger()

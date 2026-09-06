@@ -25,7 +25,7 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
             raise ValueError("Environment variables DEEZ_CLIENT_ID and DEEZ_CLIENT_SECRET are required")
         cfg = dict(cfg or {})
         for key in ('scopes', 'channels', 'storage', 'browser', 'redirect_uri',
-                    'jdelay', 'jlimit', 'loop_delay', 'default_jemote', 'spacy_model'):
+                    'jdelay', 'jlimit', 'loop_delay', 'default_jemote', 'spacy_model', 'cmd_prefix'):
             if key not in cfg and key in kwargs:
                 cfg[key] = kwargs.pop(key)
 
@@ -34,6 +34,11 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         self.web_port = int(web_cfg.get('port', 5000))
         self.web_static_dirs = list(web_cfg.get('static_dirs') or ['ui'])
         _log_handler.resize(int(web_cfg.get('log_buffer_size') or LOG_MAXLEN))
+
+        cmd_prefix_raw = cfg.get('cmd_prefix') or ['!', '~']
+        if not isinstance(cmd_prefix_raw, (list, tuple)):
+            cmd_prefix_raw = [cmd_prefix_raw]
+        self.cmd_prefix = list(dict.fromkeys(str(p).strip() for p in cmd_prefix_raw if str(p).strip())) or ['!', '~']
 
         configure_spacy(cfg.get('spacy_model'))
         self.default_jemote = cfg.get('default_jemote') or 'Kappa'
@@ -46,7 +51,7 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         pg_cfg['client_id'] = client_id
         pg_cfg['client_secret'] = client_secret
         alert_objs = kwargs.pop('alert_objs', None) or {'channel.chat.message': ChannelChatMessageAlert}
-        super().__init__(twitch_config=pg_cfg, alert_objs=alert_objs, **kwargs)
+        super().__init__(cmd_prefix=self.cmd_prefix, twitch_config=pg_cfg, alert_objs=alert_objs, **kwargs)
         self.jdelay = list(cfg.get('jdelay') or [4, 15])
         self.jcount = 0
         self.jcountmax = random.randint(*self.jdelay)

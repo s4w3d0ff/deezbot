@@ -13,14 +13,16 @@ Twitch bot that tells "deez nutz" jokes in chat channels.
 
 ## Commands
 
+Command prefixes come from the `cmd_prefix` key in `cfg.yaml` (default: `!`). Every command row below uses that prefix.
+
 | Command | Description | Permission |
 |---------|-------------|------------|
-| `/jemote <emote>` | Change channel emote used in jokes | Channel owner or bot itself |
-| `/join` | Add this channel to bot's rotation | Bot's own channel |
-| `/leave` | Remove this channel from rotation | Channel owner or bot itself |
-| `/ignore <user>` | Mute a chatter permanently | Anyone |
-| `/unignore <user>` | Unmute a previously ignored chatter | Anyone |
-| `/help` | List available commands | Anyone |
+| `!jemote <emote>` | Change channel emote used in jokes | Channel owner or bot itself |
+| `!join` | Add this channel to bot's rotation | Bot's own channel |
+| `!leave` | Remove this channel from rotation | Channel owner or bot itself |
+| `!ignore <user>` | Mute a chatter permanently | Anyone |
+| `!unignore <user>` | Unmute a previously ignored chatter | Anyone |
+| `!help` | List available commands | Anyone |
 
 ## Setup
 
@@ -52,6 +54,7 @@ jdelay: [10, 20]          # random-joke count window per cycle (min, max)
 jlimit: 600               # seconds between keyword jokes (cooldown window)
 loop_delay: 300           # seconds between connection health checks
 default_jemote: Kappa     # jemote used when a channel has none stored
+cmd_prefix: ['!', '~']    # chat command prefixes loaded at bot start (one character per entry)
 
 web:
   host: localhost         # control panel + OAuth callback bind host
