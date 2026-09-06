@@ -6,23 +6,23 @@ Twitch bot that tells "deez nutz" jokes in chat channels.
 
 - Spontaneous jokes using spaCy noun-chunk replacement (replaces a random noun in user messages with "deez nutz")
 - Keyword-triggered preset jokes (ligma, kansas, etc.)
-- Multi-channel support via join/leave commands
-- User ignore list to mute specific chatters
+- Multi-channel support via join/leave commands (own channel only)
+- Self joke opt-out: `!ignore` / `!unignore` stop or resume jokes for yourself, no argument needed
 - Per-channel customizable emote for joke delivery
 - Rate limiting on all commands (1 call per 15 seconds)
 
 ## Commands
 
-Command prefixes come from the `cmd_prefix` key in `cfg.yaml` (default: `!`). Every command row below uses that prefix.
+Command prefixes come from the `cmd_prefix` key in `cfg.yaml` (default: `!`). Every command row below uses that prefix. No admin-style permissions exist; every command affects only the caller's own preferences.
 
 | Command | Description | Permission |
 |---------|-------------|------------|
-| `!jemote <emote>` | Change channel emote used in jokes | Channel owner or bot itself |
-| `!join` | Add this channel to bot's rotation | Bot's own channel |
-| `!leave` | Remove this channel from rotation | Channel owner or bot itself |
-| `!ignore <user>` | Mute a chatter permanently | Anyone |
-| `!unignore <user>` | Unmute a previously ignored chatter | Anyone |
-| `!help` | List available commands | Anyone |
+| `!jemote <emote>` | Set your own emote used for joke delivery | Bot's own channel only |
+| `!join` | Add yourself to the bot's rotation | Bot's own channel only |
+| `!leave` | Remove yourself from the bot's rotation | Bot's own channel only |
+| `!ignore` | Self opt-out: stop joke triggers for you, no user argument | Anyone, in any channel where the bot can see messages |
+| `!unignore` | Self opt-in: re-enable joke triggers for you, no user argument | Anyone, in any channel where the bot can see messages |
+| `!help` | List available commands (alias of `!commands`) | Anyone |
 
 ## Setup
 

@@ -280,6 +280,60 @@ def test_cmd_prefix_configured_and_default(tmp_path):
     assert default._prefix == ['!', '~']
 
 
+def test_leave_gate_own_channel_only(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+    bot.http.user_id = '8000001'
+
+    user = {'user_id': '9000002', 'username': 'somechatter'}
+    own_channel = {'broadcaster_id': '8000001', 'broadcaster_user_name': 'botchan'}
+    foreign_channel = {'broadcaster_id': '7000003', 'broadcaster_user_name': 'otherchan'}
+
+    async def main():
+        await bot.storage.insert('channels', {'user_id': '9000002', 'jemote': 'GOTTEM'})
+        await bot.cmd_leave(user, foreign_channel, [])
+        assert sent == []
+        rows = (await bot.storage.query('channels'))[0]
+        assert str(rows['user_id']) == '9000002'
+        bot.cmd_leave._rate_limit_state.clear()
+
+        await bot.cmd_leave(user, own_channel, [])
+        assert sent and all(broadcaster == '8000001' for _, broadcaster in sent)
+        rows = [row for row in (await bot.storage.query('channels')) if str(row['user_id']) == '9000002']
+        assert rows == []
+
+    asyncio.run(main())
+
+
+def test_ignore_any_channel_no_arg(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+
+    user = {'user_id': '9000004', 'username': 'selfoptout'}
+    foreign_channel = {'broadcaster_id': '7000005', 'broadcaster_user_name': 'otherchan'}
+
+    async def main():
+        await bot.cmd_ignore(user, foreign_channel, [])
+        assert (await bot._get_ignore_status('9000004')) is True
+        assert sent and all(broadcaster == '7000005' for _, broadcaster in sent)
+        await bot.cmd_unignore(user, foreign_channel, [])
+        assert (await bot._get_ignore_status('9000004')) is False
+
+    asyncio.run(main())
+
+
 def test_logs_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
     root = logging.getLogger()
