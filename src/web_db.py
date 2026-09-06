@@ -33,7 +33,11 @@ class WebDbMixin:
         table = self.storage._clean_str(request.match_info['table'])
         if table in DB_SENSITIVE_TABLES:
             return jerr({"status": False, "error": f"table '{table}' is not readable from the dashboard"}, 403)
-        limit = int(request.query.get('limit') or 200)
+        limit_raw = request.query.get('limit') or 200
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return jerr({"status": False, "error": f"invalid 'limit' parameter"}, 400)
         rows = await self.storage.query(table)
         return self.app.response_json({"status": True, "table": table, "rows": rows[:limit]})
 

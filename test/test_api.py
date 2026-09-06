@@ -427,6 +427,11 @@ def test_logs_endpoint(tmp_path):
             assert by_msg['second warning line']['level'] == 'WARNING'
             assert body['newest_seq'] >= body['oldest_seq']
 
+            r = await client.get('/api/logs?lines=xyz')
+            assert r.status == 400, f"garbage lines param must be a JSON 400, got {r.status}"
+            body = (await r.json())
+            assert body['status'] is False and 'invalid' in body['error']
+
             r = await client.get('/api/logs?lines=1')
             body = (await r.json())
             assert len(body['entries']) == 1
@@ -506,6 +511,17 @@ def test_db_tables_listing_and_flags(tmp_path):
         assert 'tokens' not in tables, 'token rows must not be listed in the raw DB browser'
         assert tables['joke']['writable'] is True
         assert tables['joke']['row_count'] == 1
+
+        r = await client.get('/api/db/table/joke?limit=abc')
+        assert r.status == 400, f"non-numeric limit must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'invalid' in body['error']
+
+        rows = (await (await client.get('/api/db/table/joke?limit=1')).json())['rows']
+        assert len(rows) == 1, 'numeric limit slicing must keep working'
+
+        rows = (await (await client.get('/api/db/table/joke?limit=-5')).json())['rows']
+        assert rows == [], 'negative limit slices to empty (pre-existing behavior)'
 
     run_test(bot, probe)
 

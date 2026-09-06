@@ -4,6 +4,7 @@ import os
 from aiohttp import web as aweb
 from poolguy import route
 from logbuffer import _log_handler, LOG_MAXLEN
+from web_api import jerr
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,11 @@ async def same_origin_guard(request, handler):
 class WebManageMixin:
     @route('/api/logs')
     async def api_logs(self, request):
-        lines = int(request.query.get('lines') or 200)
+        lines_raw = request.query.get('lines') or 200
+        try:
+            lines = int(lines_raw)
+        except ValueError:
+            return jerr({"status": False, "error": f"invalid 'lines' parameter"}, 400)
         lines = max(1, min(lines, LOG_MAXLEN))
         buf = _log_handler.buffer
         entries = list(buf)[-lines:]
