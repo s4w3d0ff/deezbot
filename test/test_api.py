@@ -267,6 +267,43 @@ def test_commands_listing(tmp_path):
     run_test(bot, probe)
 
 
+def test_spacy_fallback_loads_once_concurrently(tmp_path, monkeypatch):
+    import time
+    import jokes as j
+
+    class FakeChunk:
+        start_char = 0
+        end_char = 3
+
+    class FakeDoc:
+        noun_chunks = [FakeChunk()]
+
+    class FakeNlp:
+        def __call__(self, text):
+            return FakeDoc()
+
+    calls = []
+
+    def fake_load(name):
+        calls.append(1)
+        time.sleep(0.05)
+        return FakeNlp()
+
+    monkeypatch.setattr(j.spacy, 'load', fake_load)
+    monkeypatch.setattr(j, '_nlp', None)
+    monkeypatch.setattr(j, '_spacy_model', 'testmodel')
+
+    async def main():
+        a = asyncio.create_task(j.replace_random_noun_chunk('the walnuts are here', 'deez'))
+        b = asyncio.create_task(j.replace_random_noun_chunk('some nouns around', 'deez'))
+        return await asyncio.gather(a, b)
+
+    out_a, out_b = asyncio.run(main())
+    j._load_locks.clear()
+    assert out_a == 'deez walnuts are here' and out_b == 'deeze nouns around'
+    assert len(calls) == 1
+
+
 def test_cmd_prefix_configured_and_default(tmp_path):
     custom = deezbot.DeezBot(
         cfg={'cmd_prefix': ['?'], 'scopes': [], 'channels': {'channel.chat.message': None}},

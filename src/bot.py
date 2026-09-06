@@ -87,7 +87,7 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         # make random joke
         if self.jcount >= self.jcountmax:
             emote = await self.get_jemote(u_id)
-            r = replace_random_noun_chunk(message, "deez nutz")
+            r = await replace_random_noun_chunk(message, "deez nutz")
             if r:
                 self._resetjcount()
                 self.lastjoke = time.time()
