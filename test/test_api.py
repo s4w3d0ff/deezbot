@@ -617,6 +617,57 @@ def test_deez_loop_failure_logs_exception(tmp_path):
     assert recs[0].exc_info is not None
 
 
+def test_origin_guard_cross_and_same_origin(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        evil_headers = {'Origin': 'http://evil.example', 'Content-Type': 'text/plain'}
+        r = await client.post('/api/db/table/joke', data='{"keyword": "evil", "joke": "nope"}', headers=evil_headers)
+        assert r.status == 403
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert not [row for row in rows if row['keyword'] == 'evil'], 'cross-origin write must not reach storage'
+
+        r = await client.delete('/api/db/table/joke', data='{"where": "1=1"}', headers={'Origin': 'http://evil.example'})
+        assert r.status == 403, 'state changing DELETE with foreign Origin must be rejected'
+
+        origin = f"http://{client.host}:{client.port}"
+        r = await client.post('/api/db/table/joke', json={'keyword': 'friendly', 'joke': 'same origin ok'}, headers={'Origin': origin})
+        assert r.status == 200, 'same-origin request must not be blocked'
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert [row for row in rows if row['keyword'] == 'friendly'], 'same-origin insert should land'
+
+    run_test(bot, probe)
+
+
+def test_nonloopback_bind_warns(tmp_path):
+    cap_logger = logging.getLogger('bot')
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if 'reachable beyond this machine' in record.getMessage():
+                recs.append(record)
+
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        make_bot(str(tmp_path))
+        assert recs == [], 'localhost bind must not trigger the exposure warning'
+
+        exposed = deezbot.DeezBot(cfg={
+            'scopes': [], 'channels': {'channel.chat.message': None},
+            'storage': SQLiteStorage(os.path.join(str(tmp_path), 'exposed.db')),
+            'web': {'host': '192.168.0.50', 'port': 5000},
+        })
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert exposed.web_host == '192.168.0.50'
+    assert len(recs) == 1, 'non-loopback bind must log exactly one warning at construction'
+
+
 def test_config_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
 

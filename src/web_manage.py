@@ -1,10 +1,33 @@
 import asyncio
 import logging
 import os
+from aiohttp import web as aweb
 from poolguy import route
 from logbuffer import _log_handler, LOG_MAXLEN
 
 logger = logging.getLogger(__name__)
+
+STATE_CHANGING_METHODS = ('POST', 'PUT', 'DELETE', 'PATCH')
+
+
+def _origin_host(origin):
+    parts = origin.split('://', 1)
+    if len(parts) != 2 or not parts[1]:
+        return None
+    return parts[1].split('/', 1)[0].lower()
+
+
+@aweb.middleware
+async def same_origin_guard(request, handler):
+    if request.method in STATE_CHANGING_METHODS:
+        origin = request.headers.get('Origin')
+        if origin is not None:
+            host = _origin_host(origin)
+            req_host = (request.host or '').lower()
+            if host != req_host:
+                logger.warning(f"cross-origin {request.method} {request.path} rejected from Origin '{origin}'")
+                return aweb.json_response({'status': False, 'error': 'cross-origin state changing request rejected'}, status=403)
+    return await handler(request)
 
 
 class WebManageMixin:
