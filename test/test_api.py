@@ -463,6 +463,54 @@ def test_chat_chunking_400_chars(tmp_path):
     run_test(bot, probe)
 
 
+def test_deez_loop_failure_logs_exception(tmp_path):
+    bot = make_bot(str(tmp_path))
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    cap_logger = logging.getLogger('web_manage')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+
+    async def boom():
+        raise RuntimeError('helix down for deezing')
+
+    bot.check_connections = boom
+
+    original_sleep = asyncio.sleep
+
+    async def fast_sleep(seconds):
+        await original_sleep(0.01)
+
+    try:
+        asyncio.sleep = fast_sleep
+
+        async def main():
+            task = asyncio.create_task(bot.deez_loop())
+            while not records:
+                await original_sleep(0.01)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(main())
+    finally:
+        asyncio.sleep = original_sleep
+        cap_logger.removeHandler(handler)
+
+    recs = [r for r in records if 'deez_loop Error' in r.getMessage()]
+    assert recs, 'no deez_loop error record captured'
+    msg = recs[0].getMessage()
+    assert 'helix down for deezing' in msg
+    assert '{e}' not in msg
+    assert recs[0].exc_info is not None
+
+
 def test_config_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
 
