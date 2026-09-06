@@ -526,6 +526,27 @@ def test_db_tables_listing_and_flags(tmp_path):
     run_test(bot, probe)
 
 
+def test_db_delete_shape_validation(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'victim', 'joke': 'should survive bad deletes'}))
+
+    async def probe(client):
+        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ?', 'params': 'abc'})
+        assert r.status == 400, f"string params must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'list' in body['error']
+
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert [row for row in rows if row['keyword'] == 'victim'], 'failed delete must not touch storage'
+
+        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ? AND user_id = ?', 'params': ['x']})
+        assert r.status == 400, f"placeholder/param mismatch must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert '2' in body['error'] and '1' in body['error'], f"error must show both counts: {body['error']!r}"
+
+    run_test(bot, probe)
+
+
 def test_db_roundtrip_insert_get_delete(tmp_path):
     bot = make_bot(str(tmp_path))
 

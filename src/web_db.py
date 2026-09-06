@@ -65,9 +65,15 @@ class WebDbMixin:
         if body is None:
             return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
         where = body.get('where')
-        params = tuple(body.get('params') or ())
         if not where:
             return jerr({"status": False, "error": "missing 'where' clause"}, 400)
+        params_raw = body.get('params')
+        if params_raw is not None and not isinstance(params_raw, list):
+            return jerr({"status": False, "error": "'params' must be a list"}, 400)
+        params = tuple(params_raw or ())
+        placeholders = where.count('?')
+        if placeholders != len(params):
+            return jerr({"status": False, "error": f"'where' has {placeholders} placeholder(s) but {len(params)} param(s) provided"}, 400)
         await self.storage.delete(table, where=where, params=params)
         logger.info(f"UI db delete from {table}: {where} {params}")
         return self.app.response_json({"status": True, "deleted_from": table})
