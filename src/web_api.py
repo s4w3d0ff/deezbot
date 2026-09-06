@@ -29,6 +29,14 @@ def _ignore_truthy(val):
     return str(val).strip().lower() not in ('0', 'false', '')
 
 
+def _ws_connected(ws):
+    socket = getattr(ws, '_socket', None)
+    session_id = getattr(ws, '_session_id', None)
+    if socket is None or session_id is None:
+        return False
+    return True
+
+
 class WebApiMixin:
     @route('/')
     async def ui_index(self, request):
@@ -55,7 +63,7 @@ class WebApiMixin:
             "user_id": str(self.http.user_id) if self.http.user_id else None,
             "username": username,
             "token_expires_time": token.get('expires_time'),
-            "ws_connected": self.ws._socket is not None and self.ws._session_id is not None,
+            "ws_connected": _ws_connected(self.ws),
             "uptime_seconds": int(time.time() - getattr(self, '_started_at', time.time())),
             "channels_total": len(chans),
             "channels_live": live_count,

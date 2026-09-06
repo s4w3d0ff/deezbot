@@ -166,3 +166,4 @@ deezbot/
 - Joke cycle resets randomly after hitting jcountmax (between jdelay[0] and jdelay[1])
 - Runtime cache files in db/ are recreated automatically if deleted
 - `browser` in cfg.yaml is platform-specific (e.g. firefox); omit it for the system default browser
+- Websocket connection state at `/api/status` is read defensively: framework internal renames degrade the indicator to false instead of breaking every status poll

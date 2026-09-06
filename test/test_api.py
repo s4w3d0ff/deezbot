@@ -191,6 +191,19 @@ def test_status_joke_state(tmp_path):
     run_test(bot, probe)
 
 
+def test_status_survives_ws_internal_renames(tmp_path):
+    bot = make_bot(str(tmp_path))
+    bot.ws = object()
+
+    async def probe(client):
+        r = await client.get('/api/status')
+        assert r.status == 200, f"status must survive ws internal renames, got {r.status}"
+        body = await r.json()
+        assert body['ws_connected'] is False, 'missing socket/session attrs must degrade to False'
+
+    run_test(bot, probe)
+
+
 def test_add_channel_resolves_login(tmp_path):
     bot = make_bot(str(tmp_path))
 
