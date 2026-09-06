@@ -1,7 +1,7 @@
 import logging
 import aiosqlite
 from poolguy import route
-from web_api import jerr
+from web_api import _json_body, jerr
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,10 @@ class WebDbMixin:
         table = self.storage._clean_str(request.match_info['table'])
         if table not in self.db_write_tables:
             return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
-        body = await request.json()
-        data = {k: str(v) for k, v in body.items()} if isinstance(body, dict) else {}
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
+        data = {k: str(v) for k, v in body.items()}
         if not data:
             return jerr({"status": False, "error": "empty row payload"}, 400)
         await self.storage.insert(table, data)
@@ -55,8 +57,10 @@ class WebDbMixin:
         table = self.storage._clean_str(request.match_info['table'])
         if table not in self.db_write_tables:
             return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
-        body = await request.json()
-        where = (body or {}).get('where')
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
+        where = body.get('where')
         params = tuple(body.get('params') or ())
         if not where:
             return jerr({"status": False, "error": "missing 'where' clause"}, 400)

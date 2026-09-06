@@ -12,6 +12,17 @@ def jerr(data, status):
     return aweb.json_response(data, status=status)
 
 
+async def _json_body(request):
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.warning(f"invalid JSON body for {request.method} {request.path}: {e}")
+        return None
+    if not isinstance(body, dict):
+        return None
+    return body
+
+
 def _ignore_truthy(val):
     if val is None:
         return False
@@ -72,11 +83,17 @@ class WebApiMixin:
 
     @route('/api/channels', method='POST')
     async def api_channels_add(self, request):
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
         login = (body.get('login') or '').strip().lstrip('@')
         if not login:
             return jerr({"status": False, "error": "missing 'login'"}, 400)
-        users = await self.http.getUsers(logins=[login])
+        try:
+            users = await self.http.getUsers(logins=[login])
+        except Exception as e:
+            logger.exception(f"twitch user lookup failed for '{login}': {e}")
+            return jerr({"status": False, "error": "twitch user lookup failed"}, 502)
         if not users:
             return jerr({"status": False, "error": f"twitch user '{login}' not found"}, 404)
         u = users[0]
@@ -97,11 +114,17 @@ class WebApiMixin:
 
     @route('/api/ignores', method='POST')
     async def api_ignores_add(self, request):
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
         login = (body.get('login') or '').strip().lstrip('@')
         if not login:
             return jerr({"status": False, "error": "missing 'login'"}, 400)
-        users = await self.http.getUsers(logins=[login])
+        try:
+            users = await self.http.getUsers(logins=[login])
+        except Exception as e:
+            logger.exception(f"twitch user lookup failed for '{login}': {e}")
+            return jerr({"status": False, "error": "twitch user lookup failed"}, 502)
         if not users:
             return jerr({"status": False, "error": f"twitch user '{login}' not found"}, 404)
         u = users[0]
@@ -123,7 +146,9 @@ class WebApiMixin:
 
     @route('/api/test/joke', method='POST')
     async def api_test_joke(self, request):
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
         message = (body.get('message') or '').strip()
         if not message:
             return jerr({"status": False, "error": "missing 'message'"}, 400)
@@ -140,7 +165,9 @@ class WebApiMixin:
 
     @route('/api/test/chat', method='POST')
     async def api_test_chat(self, request):
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
         message = (body.get('message') or '').strip()
         if not message:
             return jerr({"status": False, "error": "missing 'message'"}, 400)

@@ -248,6 +248,42 @@ def test_add_ignore_resolves_login(tmp_path):
     run_test(bot, probe)
 
 
+def test_malformed_bodies_return_json_400(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        r = await client.post('/api/channels', data='not json at all', headers={'Content-Type': 'text/plain'})
+        assert r.status == 400, f"non-JSON channel body must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
+
+        r = await client.post('/api/db/table/joke', data='', headers={'Content-Type': 'text/plain'})
+        assert r.status == 400, f"empty db insert body must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
+
+    run_test(bot, probe)
+
+
+def test_channels_add_upstream_failure_502(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def boom(logins=None, **kwargs):
+        raise RuntimeError('helix exploded')
+
+    bot.http.getUsers = boom
+
+    async def probe(client):
+        r = await client.post('/api/channels', json={'login': 'somechan'})
+        assert r.status == 502, f"upstream lookup failure must be a JSON 502, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'twitch user lookup failed' in body['error']
+
+    run_test(bot, probe)
+    rows = asyncio.run(bot.storage.query('channels'))
+    assert rows == [], 'failed channel add must not write a storage row'
+
+
 def test_commands_listing(tmp_path):
     bot = make_bot(str(tmp_path))
 
