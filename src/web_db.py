@@ -5,6 +5,8 @@ from web_api import jerr
 
 logger = logging.getLogger(__name__)
 
+DB_SENSITIVE_TABLES = ('tokens', 'queue')
+
 
 class WebDbMixin:
     @route('/api/db/tables')
@@ -14,6 +16,8 @@ class WebDbMixin:
             async with db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name") as cur:
                 names = [row[0] async for row in cur]
             for name in names:
+                if name in DB_SENSITIVE_TABLES:
+                    continue
                 clean = self.storage._clean_str(name)
                 async with db.execute(f'SELECT count(*) FROM {clean}') as cur:
                     row = await cur.fetchone()
@@ -27,6 +31,8 @@ class WebDbMixin:
     @route('/api/db/table/{table}')
     async def api_db_table(self, request):
         table = self.storage._clean_str(request.match_info['table'])
+        if table in DB_SENSITIVE_TABLES:
+            return jerr({"status": False, "error": f"table '{table}' is not readable from the dashboard"}, 403)
         limit = int(request.query.get('limit') or 200)
         rows = await self.storage.query(table)
         return self.app.response_json({"status": True, "table": table, "rows": rows[:limit]})

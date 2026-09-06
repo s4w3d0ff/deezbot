@@ -466,10 +466,10 @@ def test_db_tables_listing_and_flags(tmp_path):
         r = await client.get('/api/db/tables')
         assert r.status == 200
         tables = {t['name']: t for t in (await r.json())['tables']}
-        assert 'joke' in tables and 'tokens' in tables
+        assert 'joke' in tables
+        assert 'tokens' not in tables, 'token rows must not be listed in the raw DB browser'
         assert tables['joke']['writable'] is True
         assert tables['joke']['row_count'] == 1
-        assert tables['tokens']['writable'] is False
 
     run_test(bot, probe)
 
@@ -504,7 +504,9 @@ def test_db_write_whitelist_403(tmp_path):
         r = await client.delete('/api/db/table/queue', json={'where': 'name = ?', 'params': ['x']})
         assert r.status == 403
         r = await client.get('/api/db/table/tokens')
-        assert r.status == 200
+        assert r.status == 403
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
 
     run_test(bot, probe)
 
