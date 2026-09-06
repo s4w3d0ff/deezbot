@@ -1,3 +1,8 @@
+// manual callers (post-mutation refreshes from jokes/channels/ignores) call refreshStatus directly and bypass this gate on purpose
+function statusPollAllowed() {
+  return activeTab === 'status' && document.visibilityState === 'visible';
+}
+
 async function refreshStatus() {
   let s;
   try { s = await api('/api/status'); } catch (_) { return; }
