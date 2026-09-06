@@ -127,7 +127,7 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
                 try:
                     streams = await self.http.getStreams(user_id=ids, type='live', first=100)
                     for s in streams:
-                        live_map[s['id']] = {'is_live': True, 'viewers': s.get('viewer_count') or 0, 'title': s.get('title') or ''}
+                        live_map[s['user_id']] = {'is_live': True, 'viewers': s.get('viewer_count') or 0, 'title': s.get('title') or ''}
                 except Exception as e:
                     logger.warning(f"Channel stream status check failed: {e}")
             self._chan_info_map, self._chan_live_map = info_map, live_map

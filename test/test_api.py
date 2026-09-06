@@ -103,7 +103,7 @@ def test_channels_enriched(tmp_path):
         ]
 
     async def fake_get_streams(first=None, **kwargs):
-        return [{'id': '2000001', 'user_id': '2000001', 'viewer_count': 42, 'title': 'just deezing'}]
+        return [{'id': '999999', 'user_id': '2000001', 'viewer_count': 42, 'title': 'just deezing'}]
 
     bot.http.getUsers = fake_get_users
     bot.http.getStreams = fake_get_streams
@@ -123,6 +123,7 @@ def test_channels_enriched(tmp_path):
         off = by_id['2000002']
         assert off['is_live'] is False and off['viewers'] == 0 and off['title'] == ''
         assert body['channels'][0]['user_id'] == '2000001'
+        assert bot._chan_live_map.keys() == {'2000001'}
 
     run_test(bot, probe)
 
