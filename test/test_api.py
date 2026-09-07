@@ -1096,6 +1096,65 @@ def test_config_sections_from_yaml(tmp_path):
     assert bot.ui_cfg['status_poll_ms'] == 1234
 
 
+def test_log_buffer_caps_entry_and_quiet_repeat_connection_dump(tmp_path):
+    bot = make_bot(str(tmp_path))
+    assert deezbot._log_handler.buffer.maxlen == 1000
+
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            recs.append(record)
+
+    cap_logger = logging.getLogger('deeztest')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        deezbot._log_handler.buffer.clear()
+        for i in range(999):
+            cap_logger.warning(f'filler {i}')
+        cap_logger.warning('H' * 5000)
+        entries = list(deezbot._log_handler.buffer)
+        assert len(entries) == 1000, f"buffer must stay bounded at maxlen, got {len(entries)}"
+        assert all(len(e['msg']) <= 500 for e in entries), 'every stored entry msg must be capped at 500 chars'
+        huge = [e for e in entries if e['msg'].startswith('H')]
+        assert len(huge) == 1 and len(huge[0]['msg']) == 500, f'huge line must truncate to exactly 500, got {len(huge[0]["msg"])}'
+
+        bot.http.user_id = '8000200'
+        warn_msgs = []
+
+        class WarnCap(logging.Handler):
+            def emit(self, record):
+                if record.levelno >= logging.WARNING:
+                    warn_msgs.append(record.getMessage())
+
+        async def fake_eventsubs():
+            return {'8000200': {'id': 'ev1'}}
+
+        async def no_channels():
+            return {}
+
+        bot.connected_channels = fake_eventsubs
+        bot._get_channel_list = no_channels
+        warn_logger = logging.getLogger('bot')
+        whandler = WarnCap()
+        warn_logger.addHandler(whandler)
+        try:
+            async def main():
+                await bot.check_connections()
+                await bot.check_connections()
+                await bot.check_connections()
+            asyncio.run(main())
+        finally:
+            warn_logger.removeHandler(whandler)
+
+        conn_dumps = [m for m in warn_msgs if 'Current connections' in m]
+        assert len(conn_dumps) == 1, f"unchanged connection set must log the dump exactly once across cycles, got {len(conn_dumps)}"
+        assert "'8000200'" in conn_dumps[0], f'dump must name the connected ids: {conn_dumps[0]}'
+    finally:
+        cap_logger.removeHandler(handler)
+
+
 def test_jemote_arg_validation_no_onair_errors(tmp_path):
     bot = make_bot(str(tmp_path))
     sent = []

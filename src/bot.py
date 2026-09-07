@@ -188,7 +188,11 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
     async def check_connections(self):
         connnected_channels = await self.connected_channels()
         connected_ids = set(connnected_channels.keys())
-        logger.warning(f"Current connections:\n{connected_ids}")
+        if connected_ids == getattr(self, '_last_connected_ids', None):
+            logger.debug(f"Current connections:\n{connected_ids}")
+        else:
+            self._last_connected_ids = connected_ids
+            logger.warning(f"Current connections:\n{connected_ids}")
         l = await self._get_channel_list()
         live_r = await self.http.getStreams(user_id=list(l.keys()), type='live') if l else []
         live_list = [chan["user_id"] for chan in live_r]

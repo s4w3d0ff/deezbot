@@ -21,7 +21,7 @@ class LogBufferHandler(logging.Handler):
             'ts': time.strftime('%H:%M:%S', time.localtime(record.created)),
             'level': logging.getLevelName(record.levelno),
             'name': record.name,
-            'msg': record.getMessage(),
+            'msg': record.getMessage()[:500],
         })
 
 
