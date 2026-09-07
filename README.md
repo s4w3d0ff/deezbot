@@ -116,7 +116,7 @@ JSON endpoints behind the UI:
 | POST | `/api/db/table/{table}` | upsert insert (whitelist: `joke`, `ignore`, `channels`) |
 | DELETE | `/api/db/table/{table}` | delete by `where` + `params` (same whitelist) |
 
-The server binds localhost only — no auth layer, do not expose the port. Writes to framework tables (`tokens`, `queue`, eventsub internals) return 403; reads stay open for all tables.
+The server binds localhost by default (`web.host` in `cfg.yaml`). No auth layer, do not expose the port. Framework secret tables (`tokens`, `queue`) are excluded from both the table listing and direct reads (403); all other tables remain readable in the raw DB browser. State changing requests (POST/PUT/DELETE/PATCH) carry an Origin check: if a browser sends an Origin whose host part differs from the request Host, the route answers 403 with the JSON error shape and nothing else runs; scripts and CLI tooling that send no Origin header are unaffected, as are all GET reads. If `web.host` is set beyond loopback, startup logs one warning that the panel and OAuth callback become reachable on other machines (cross-origin writes stay blocked by the origin rule, but the surface itself is exposed).
 
 ## Structure
 
@@ -166,3 +166,4 @@ deezbot/
 - Joke cycle resets randomly after hitting jcountmax (between jdelay[0] and jdelay[1])
 - Runtime cache files in db/ are recreated automatically if deleted
 - `browser` in cfg.yaml is platform-specific (e.g. firefox); omit it for the system default browser
+- Websocket connection state at `/api/status` is read defensively: framework internal renames degrade the indicator to false instead of breaking every status poll

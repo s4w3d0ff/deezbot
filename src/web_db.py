@@ -1,9 +1,11 @@
 import logging
 import aiosqlite
 from poolguy import route
-from web_api import jerr
+from web_api import _json_body, jerr
 
 logger = logging.getLogger(__name__)
+
+DB_SENSITIVE_TABLES = ('tokens', 'queue')
 
 
 class WebDbMixin:
@@ -14,6 +16,8 @@ class WebDbMixin:
             async with db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name") as cur:
                 names = [row[0] async for row in cur]
             for name in names:
+                if name in DB_SENSITIVE_TABLES:
+                    continue
                 clean = self.storage._clean_str(name)
                 async with db.execute(f'SELECT count(*) FROM {clean}') as cur:
                     row = await cur.fetchone()
@@ -27,7 +31,13 @@ class WebDbMixin:
     @route('/api/db/table/{table}')
     async def api_db_table(self, request):
         table = self.storage._clean_str(request.match_info['table'])
-        limit = int(request.query.get('limit') or 200)
+        if table in DB_SENSITIVE_TABLES:
+            return jerr({"status": False, "error": f"table '{table}' is not readable from the dashboard"}, 403)
+        limit_raw = request.query.get('limit') or 200
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return jerr({"status": False, "error": f"invalid 'limit' parameter"}, 400)
         rows = await self.storage.query(table)
         return self.app.response_json({"status": True, "table": table, "rows": rows[:limit]})
 
@@ -36,8 +46,10 @@ class WebDbMixin:
         table = self.storage._clean_str(request.match_info['table'])
         if table not in self.db_write_tables:
             return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
-        body = await request.json()
-        data = {k: str(v) for k, v in body.items()} if isinstance(body, dict) else {}
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
+        data = {k: str(v) for k, v in body.items()}
         if not data:
             return jerr({"status": False, "error": "empty row payload"}, 400)
         await self.storage.insert(table, data)
@@ -49,11 +61,19 @@ class WebDbMixin:
         table = self.storage._clean_str(request.match_info['table'])
         if table not in self.db_write_tables:
             return jerr({"status": False, "error": f"table '{table}' is read-only"}, 403)
-        body = await request.json()
-        where = (body or {}).get('where')
-        params = tuple(body.get('params') or ())
+        body = await _json_body(request)
+        if body is None:
+            return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
+        where = body.get('where')
         if not where:
             return jerr({"status": False, "error": "missing 'where' clause"}, 400)
+        params_raw = body.get('params')
+        if params_raw is not None and not isinstance(params_raw, list):
+            return jerr({"status": False, "error": "'params' must be a list"}, 400)
+        params = tuple(params_raw or ())
+        placeholders = where.count('?')
+        if placeholders != len(params):
+            return jerr({"status": False, "error": f"'where' has {placeholders} placeholder(s) but {len(params)} param(s) provided"}, 400)
         await self.storage.delete(table, where=where, params=params)
         logger.info(f"UI db delete from {table}: {where} {params}")
         return self.app.response_json({"status": True, "deleted_from": table})

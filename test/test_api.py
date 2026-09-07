@@ -191,6 +191,19 @@ def test_status_joke_state(tmp_path):
     run_test(bot, probe)
 
 
+def test_status_survives_ws_internal_renames(tmp_path):
+    bot = make_bot(str(tmp_path))
+    bot.ws = object()
+
+    async def probe(client):
+        r = await client.get('/api/status')
+        assert r.status == 200, f"status must survive ws internal renames, got {r.status}"
+        body = await r.json()
+        assert body['ws_connected'] is False, 'missing socket/session attrs must degrade to False'
+
+    run_test(bot, probe)
+
+
 def test_add_channel_resolves_login(tmp_path):
     bot = make_bot(str(tmp_path))
 
@@ -246,6 +259,42 @@ def test_add_ignore_resolves_login(tmp_path):
         assert by_id['7000001']['ignored'] is True and by_id['7000001']['login'] == 'spammy'
 
     run_test(bot, probe)
+
+
+def test_malformed_bodies_return_json_400(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        r = await client.post('/api/channels', data='not json at all', headers={'Content-Type': 'text/plain'})
+        assert r.status == 400, f"non-JSON channel body must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
+
+        r = await client.post('/api/db/table/joke', data='', headers={'Content-Type': 'text/plain'})
+        assert r.status == 400, f"empty db insert body must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
+
+    run_test(bot, probe)
+
+
+def test_channels_add_upstream_failure_502(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def boom(logins=None, **kwargs):
+        raise RuntimeError('helix exploded')
+
+    bot.http.getUsers = boom
+
+    async def probe(client):
+        r = await client.post('/api/channels', json={'login': 'somechan'})
+        assert r.status == 502, f"upstream lookup failure must be a JSON 502, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'twitch user lookup failed' in body['error']
+
+    run_test(bot, probe)
+    rows = asyncio.run(bot.storage.query('channels'))
+    assert rows == [], 'failed channel add must not write a storage row'
 
 
 def test_commands_listing(tmp_path):
@@ -391,6 +440,11 @@ def test_logs_endpoint(tmp_path):
             assert by_msg['second warning line']['level'] == 'WARNING'
             assert body['newest_seq'] >= body['oldest_seq']
 
+            r = await client.get('/api/logs?lines=xyz')
+            assert r.status == 400, f"garbage lines param must be a JSON 400, got {r.status}"
+            body = (await r.json())
+            assert body['status'] is False and 'invalid' in body['error']
+
             r = await client.get('/api/logs?lines=1')
             body = (await r.json())
             assert len(body['entries']) == 1
@@ -466,10 +520,42 @@ def test_db_tables_listing_and_flags(tmp_path):
         r = await client.get('/api/db/tables')
         assert r.status == 200
         tables = {t['name']: t for t in (await r.json())['tables']}
-        assert 'joke' in tables and 'tokens' in tables
+        assert 'joke' in tables
+        assert 'tokens' not in tables, 'token rows must not be listed in the raw DB browser'
         assert tables['joke']['writable'] is True
         assert tables['joke']['row_count'] == 1
-        assert tables['tokens']['writable'] is False
+
+        r = await client.get('/api/db/table/joke?limit=abc')
+        assert r.status == 400, f"non-numeric limit must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'invalid' in body['error']
+
+        rows = (await (await client.get('/api/db/table/joke?limit=1')).json())['rows']
+        assert len(rows) == 1, 'numeric limit slicing must keep working'
+
+        rows = (await (await client.get('/api/db/table/joke?limit=-5')).json())['rows']
+        assert rows == [], 'negative limit slices to empty (pre-existing behavior)'
+
+    run_test(bot, probe)
+
+
+def test_db_delete_shape_validation(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'victim', 'joke': 'should survive bad deletes'}))
+
+    async def probe(client):
+        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ?', 'params': 'abc'})
+        assert r.status == 400, f"string params must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'list' in body['error']
+
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert [row for row in rows if row['keyword'] == 'victim'], 'failed delete must not touch storage'
+
+        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ? AND user_id = ?', 'params': ['x']})
+        assert r.status == 400, f"placeholder/param mismatch must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert '2' in body['error'] and '1' in body['error'], f"error must show both counts: {body['error']!r}"
 
     run_test(bot, probe)
 
@@ -504,7 +590,9 @@ def test_db_write_whitelist_403(tmp_path):
         r = await client.delete('/api/db/table/queue', json={'where': 'name = ?', 'params': ['x']})
         assert r.status == 403
         r = await client.get('/api/db/table/tokens')
-        assert r.status == 200
+        assert r.status == 403
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
 
     run_test(bot, probe)
 
@@ -613,6 +701,57 @@ def test_deez_loop_failure_logs_exception(tmp_path):
     assert 'helix down for deezing' in msg
     assert '{e}' not in msg
     assert recs[0].exc_info is not None
+
+
+def test_origin_guard_cross_and_same_origin(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        evil_headers = {'Origin': 'http://evil.example', 'Content-Type': 'text/plain'}
+        r = await client.post('/api/db/table/joke', data='{"keyword": "evil", "joke": "nope"}', headers=evil_headers)
+        assert r.status == 403
+        body = await r.json()
+        assert body['status'] is False and 'error' in body
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert not [row for row in rows if row['keyword'] == 'evil'], 'cross-origin write must not reach storage'
+
+        r = await client.delete('/api/db/table/joke', data='{"where": "1=1"}', headers={'Origin': 'http://evil.example'})
+        assert r.status == 403, 'state changing DELETE with foreign Origin must be rejected'
+
+        origin = f"http://{client.host}:{client.port}"
+        r = await client.post('/api/db/table/joke', json={'keyword': 'friendly', 'joke': 'same origin ok'}, headers={'Origin': origin})
+        assert r.status == 200, 'same-origin request must not be blocked'
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert [row for row in rows if row['keyword'] == 'friendly'], 'same-origin insert should land'
+
+    run_test(bot, probe)
+
+
+def test_nonloopback_bind_warns(tmp_path):
+    cap_logger = logging.getLogger('bot')
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if 'reachable beyond this machine' in record.getMessage():
+                recs.append(record)
+
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        make_bot(str(tmp_path))
+        assert recs == [], 'localhost bind must not trigger the exposure warning'
+
+        exposed = deezbot.DeezBot(cfg={
+            'scopes': [], 'channels': {'channel.chat.message': None},
+            'storage': SQLiteStorage(os.path.join(str(tmp_path), 'exposed.db')),
+            'web': {'host': '192.168.0.50', 'port': 5000},
+        })
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert exposed.web_host == '192.168.0.50'
+    assert len(recs) == 1, 'non-loopback bind must log exactly one warning at construction'
 
 
 def test_config_endpoint(tmp_path):

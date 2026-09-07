@@ -10,7 +10,7 @@ from jokes import configure_spacy, replace_random_noun_chunk, DEFAULT_SPACY_MODE
 from alerts import ChannelChatMessageAlert
 from commands import CommandsMixin
 from web_api import WebApiMixin, _ignore_truthy
-from web_manage import WebManageMixin
+from web_manage import WebManageMixin, same_origin_guard
 from web_db import WebDbMixin
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,8 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
 
         web_cfg = dict(cfg.get('web') or {})
         self.web_host = web_cfg.get('host', 'localhost')
+        if str(self.web_host).lower() not in ('localhost', '127.0.0.1', '::1'):
+            logger.warning(f"web panel bound to {self.web_host}: panel and OAuth callback are reachable beyond this machine; cross-origin writes are blocked by origin, but the surface itself is exposed")
         self.web_port = int(web_cfg.get('port', 5000))
         self.web_static_dirs = list(web_cfg.get('static_dirs') or ['ui'])
         _log_handler.resize(int(web_cfg.get('log_buffer_size') or LOG_MAXLEN))
@@ -59,6 +61,11 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         self.jlimit = float(cfg.get('jlimit') or 20)
         self.lastjoke = 0
         self._started_at = time.time()
+
+    def _setup(self):
+        super()._setup()
+        if same_origin_guard not in self.app.app.middlewares:
+            self.app.app.middlewares.append(same_origin_guard)
 
     def _resetjcount(self):
         self.lastjoke = 0
