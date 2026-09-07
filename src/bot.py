@@ -55,8 +55,8 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         alert_objs = kwargs.pop('alert_objs', None) or {'channel.chat.message': ChannelChatMessageAlert}
         super().__init__(cmd_prefix=self.cmd_prefix, twitch_config=pg_cfg, alert_objs=alert_objs, **kwargs)
         self.jdelay = list(cfg.get('jdelay') or [4, 15])
-        self.jcount = 0
-        self.jcountmax = random.randint(*self.jdelay)
+        self.msg_since_joke = 0
+        self.next_joke_after = random.randint(*self.jdelay)
         self.loop_delay = int(cfg.get('loop_delay') or 300)
         self.jlimit = float(cfg.get('jlimit') or 20)
         self.lastjoke = 0
@@ -67,10 +67,10 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         if same_origin_guard not in self.app.app.middlewares:
             self.app.app.middlewares.append(same_origin_guard)
 
-    def _resetjcount(self):
+    def _reset_joke_window(self):
         self.lastjoke = 0
-        self.jcount = 0
-        self.jcountmax = random.randint(*self.jdelay)
+        self.msg_since_joke = 0
+        self.next_joke_after = random.randint(*self.jdelay)
 
     async def get_jemote(self, u_id):
         chans = await self._get_channel_list()
@@ -81,22 +81,22 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
     async def makeJoke(self, data):
         message = data['message']['text']
         u_id = data["broadcaster_user_id"]
-        self.jcount += 1
+        self.msg_since_joke += 1
         # keep from spamming jokes if keywords are being used
         jokes = await self._get_jokes()
         if time.time() - self.lastjoke >= self.jlimit:
             emote = await self.get_jemote(u_id)
             for key, joke in jokes.items():
                 if key in message.lower():
-                    self._resetjcount()
+                    self._reset_joke_window()
                     self.lastjoke = time.time()
                     return f"{joke}! {emote}"
         # make random joke
-        if self.jcount >= self.jcountmax:
+        if self.msg_since_joke >= self.next_joke_after:
             emote = await self.get_jemote(u_id)
             r = await replace_random_noun_chunk(message, "deez nutz")
             if r:
-                self._resetjcount()
+                self._reset_joke_window()
                 self.lastjoke = time.time()
                 return f"{r} {emote}"
 

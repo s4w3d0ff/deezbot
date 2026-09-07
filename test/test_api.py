@@ -457,7 +457,7 @@ def test_logs_endpoint(tmp_path):
 def test_makejoke_keyword_cooldown(tmp_path):
     bot = make_bot(str(tmp_path))
     bot.jdelay = (50, 60)
-    bot.jcountmax = random.randint(*bot.jdelay)
+    bot.next_joke_after = random.randint(*bot.jdelay)
     asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
 
     async def probe():
@@ -491,12 +491,12 @@ def test_joke_spacy_miss_and_stateless(tmp_path):
     asyncio.run(bot.storage.insert('joke', {'keyword': 'zzzznotpresent', 'joke': 'nope'}))
 
     async def probe(client):
-        before = (bot.jcount, bot.lastjoke)
+        before = (bot.msg_since_joke, bot.lastjoke)
         r = await client.post('/api/test/joke', json={'message': '1 2 3'})
         assert r.status == 200
         body = await r.json()
         assert body['reply'] is None
-        assert (bot.jcount, bot.lastjoke) == before
+        assert (bot.msg_since_joke, bot.lastjoke) == before
 
     run_test(bot, probe)
 
