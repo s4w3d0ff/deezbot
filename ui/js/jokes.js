@@ -43,7 +43,7 @@ async function loadJokes() {
         return;
       }
       await post('/api/db/table/joke', { ...row, keyword: v });
-      if (String(row.keyword) !== v) await del('/api/db/table/joke', { where: 'keyword = ?', params: [String(row.keyword)] });
+      if (String(row.keyword) !== v) await del('/api/db/table/joke', { keyword: String(row.keyword) });
       loadJokes();
       refreshStatus();
     });
@@ -52,7 +52,7 @@ async function loadJokes() {
     const b = el('button', 'del');
     b.addEventListener('click', async () => {
       if (!confirm(`delete joke keyword "${row.keyword}"?`)) return;
-      try { await del('/api/db/table/joke', { where: 'keyword = ?', params: [String(row.keyword)] }); loadJokes(); refreshStatus(); } catch (_) {}
+      try { await del('/api/db/table/joke', { keyword: String(row.keyword) }); loadJokes(); refreshStatus(); } catch (_) {}
     });
     delTd.append(b);
     tr.append(kwTd, jokeTd, delTd);

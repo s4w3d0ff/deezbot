@@ -12,17 +12,20 @@ class CommandsMixin:
     @rate_limit(calls=1, period=15)
     async def cmd_jemote(self, user, channel, args):
         """ Changes the jemote for the caller """
-        if self._is_own_channel(user, channel):
-            emote = args[0]
-            try:
-                await self._update_channel_list(user["user_id"], config={"jemote": emote})
-                await self.send_chat(
-                        f"{emote} I like it @{user['username']}",
-                        channel["broadcaster_id"]
-                    )
-                logger.info(f'Changed {user["username"]} emote: {emote}')
-            except:
-                logger.exception(f"\n")
+        if not self._is_own_channel(user, channel) or len(args) < 1:
+            return
+        emote = str(args[0])
+        if len(emote) > 32 or any(ch.isspace() for ch in emote):
+            return
+        try:
+            await self._update_channel_list(user["user_id"], config={"jemote": emote})
+            await self.send_chat(
+                    f"{emote} I like it @{user['username']}",
+                    channel["broadcaster_id"]
+                )
+            logger.info(f'Changed {user["username"]} emote: {emote}')
+        except:
+            logger.exception(f"\n")
 
     @command(name="join")
     @rate_limit(calls=1, period=15)

@@ -110,13 +110,13 @@ JSON endpoints behind the UI:
 | GET | `/api/config` | effective runtime config: web bind, joke timing, cache ttl, writable tables, log buffer size, ui section |
 | GET | `/api/logs?lines=200` | in-process log ring buffer (max 1000) tail, `oldest_seq`/`newest_seq` for incremental polling |
 | POST | `/api/test/joke` | `{message}` → keyword/spacy dry run, no side effects |
-| POST | `/api/test/chat` | `{message}` → real send to the bot's own channel, 400-char chunks |
+| POST | `/api/test/chat` | `{message}` → real send to the bot's own channel, 400-char chunks; 400 above a 2000-character message cap |
 | GET | `/api/db/tables` | table names, row counts, writable flag |
 | GET | `/api/db/table/{table}?limit=200` | rows via storage query |
 | POST | `/api/db/table/{table}` | upsert insert (whitelist: `joke`, `ignore`, `channels`) |
-| DELETE | `/api/db/table/{table}` | delete by `where` + `params` (same whitelist) |
+| DELETE | `/api/db/table/{table}` | structured single-row delete: body is exactly one key/value pair mapping the table primary-key column to its value, bound as a parameter (same whitelist) |
 
-The server binds localhost by default (`web.host` in `cfg.yaml`). No auth layer, do not expose the port. Framework secret tables (`tokens`, `queue`) are excluded from both the table listing and direct reads (403); all other tables remain readable in the raw DB browser. State changing requests (POST/PUT/DELETE/PATCH) carry an Origin check: if a browser sends an Origin whose host part differs from the request Host, the route answers 403 with the JSON error shape and nothing else runs; scripts and CLI tooling that send no Origin header are unaffected, as are all GET reads. If `web.host` is set beyond loopback, startup logs one warning that the panel and OAuth callback become reachable on other machines (cross-origin writes stay blocked by the origin rule, but the surface itself is exposed).
+The server binds localhost by default (`web.host` in `cfg.yaml`). No auth layer, do not expose the port. Framework secret tables (`tokens`, `queue`) are excluded from both the table listing and direct reads (403); all other tables remain readable in the raw DB browser. The delete route takes a structured single-row primary-key filter and binds its value as a parameter; no free-form SQL text reaches the query builder. State changing requests (POST/PUT/DELETE/PATCH) carry an Origin check: if a browser sends an Origin whose host part differs from the request Host, the route answers 403 with the JSON error shape and nothing else runs; scripts and CLI tooling that send no Origin header are unaffected, as are all GET reads. If `web.host` is set beyond loopback, startup logs one warning that the panel and OAuth callback become reachable on other machines (cross-origin writes stay blocked by the origin rule, but the surface itself is exposed).
 
 ## Structure
 

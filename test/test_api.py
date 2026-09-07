@@ -71,6 +71,59 @@ def test_before_login_starts_steady_state_server(tmp_path):
     asyncio.run(main())
 
 
+def test_joke_schema_fresh_db_auto_creates(tmp_path):
+    bot = make_bot(str(tmp_path))
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.CRITICAL:
+                recs.append(record)
+
+    cap_logger = logging.getLogger('bot')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        asyncio.run(bot._check_joke_schema())
+        jokes = asyncio.run(bot._get_jokes())
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert recs == [], f"fresh db must not log schema drift, got {[r.getMessage() for r in recs]}"
+    assert jokes == {}
+
+
+def test_joke_schema_drift_logs_critical_and_dry_run_errors(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'word': 'fitness', 'text': 'dick fit'}))
+
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.CRITICAL:
+                recs.append(record)
+
+    cap_logger = logging.getLogger('bot')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        asyncio.run(bot._check_joke_schema())
+
+        async def probe(client):
+            r = await client.post('/api/test/joke', json={'message': 'my fitness journey'})
+            assert r.status >= 500, f"drifted schema dry run must be an error response, got {r.status}"
+
+        run_test(bot, probe)
+    finally:
+        cap_logger.removeHandler(handler)
+
+    crit = [r for r in recs if 'schema drift' in r.getMessage()]
+    assert len(crit) == 1, f"drifted schema must log exactly one CRITICAL, got {len(crit)}"
+    msg = crit[0].getMessage()
+    assert 'word' in msg and 'text' in msg, f"CRITICAL must name the actual columns found: {msg}"
+
+
 def test_status_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
     asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
@@ -545,17 +598,87 @@ def test_db_delete_shape_validation(tmp_path):
 
     async def probe(client):
         r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ?', 'params': 'abc'})
-        assert r.status == 400, f"string params must be a JSON 400, got {r.status}"
+        assert r.status == 400, f"old-style where/params body must be a JSON 400, got {r.status}"
         body = await r.json()
-        assert body['status'] is False and 'list' in body['error']
+        assert body['status'] is False and 'primary-key' in body['error']
 
         rows = (await (await client.get('/api/db/table/joke')).json())['rows']
         assert [row for row in rows if row['keyword'] == 'victim'], 'failed delete must not touch storage'
 
-        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ? AND user_id = ?', 'params': ['x']})
-        assert r.status == 400, f"placeholder/param mismatch must be a JSON 400, got {r.status}"
+        r = await client.delete('/api/db/table/joke', json={'where': '1=1', 'params': []})
+        assert r.status == 400, f"mass-delete body must be a JSON 400, got {r.status}"
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert len(rows) == 1 and rows[0]['keyword'] == 'victim', 'old-style mass delete must leave every row intact'
+
+    run_test(bot, probe)
+
+
+def test_db_delete_injection_replays(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'alpha', 'joke': 'one'}))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'beta', 'joke': 'two'}))
+    asyncio.run(bot.storage.save_token('twitch', {'token_json': '{"access_token": "leaked-material"}'}))
+
+    async def tokens_row():
+        rows = await bot.storage.query('tokens')
+        return [row for row in rows if row.get('name') == 'twitch']
+
+    before = asyncio.run(tokens_row())
+    assert len(before) == 1, 'test needs exactly one seeded tokens row'
+
+    async def probe(client):
+        r = await client.delete('/api/db/table/joke', json={'where': '1=1 AND EXISTS (SELECT 1 FROM tokens WHERE token_json LIKE ?)', 'params': ['%leaked-material%']})
+        assert r.status == 400, f"subquery oracle body must be a JSON 400, got {r.status}"
+
+        r = await client.delete('/api/db/table/tokens', json={'name': 'twitch'})
+        assert r.status == 403, 'protected table delete must stay 403 even with the structured body'
+
+    run_test(bot, probe)
+
+    after = asyncio.run(tokens_row())
+    assert after == before, 'tokens row must be byte-identical after failed oracle deletes'
+    rows = asyncio.run(bot.storage.query('joke'))
+    assert len(rows) == 2, 'both joke rows must survive the injection replays'
+
+
+def test_db_delete_single_pk_each_writable_table(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        r = await client.post('/api/db/table/joke', json={'keyword': 'tulip', 'joke': 'deez nutz on yo head'})
+        assert r.status == 200
+        r = await client.post('/api/db/table/ignore', json={'user_id': '5500001', 'ignore': 'True'})
+        assert r.status == 200
+        r = await client.post('/api/db/table/channels', json={'user_id': '5500002', 'jemote': 'Kappa'})
+        assert r.status == 200
+
+        for table, pk in (('joke', {'keyword': 'tulip'}), ('ignore', {'user_id': '5500001'}), ('channels', {'user_id': '5500002'})):
+            r = await client.delete(f'/api/db/table/{table}', json=pk)
+            assert r.status == 200, f"structured single-PK delete on {table} must succeed, got {r.status}"
+
+        for table in ('joke', 'ignore', 'channels'):
+            rows = (await (await client.get(f'/api/db/table/{table}')).json())['rows']
+            assert rows == [], f'{table} must be empty after single-row deletes'
+
+    run_test(bot, probe)
+
+
+def test_db_delete_rejects_wrong_pk_and_shapes(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'keeper', 'joke': 'stays'}))
+
+    async def probe(client):
+        r = await client.delete('/api/db/table/joke', json={'joke': 'stays'})
+        assert r.status == 400, f"non-PK column body must be a JSON 400, got {r.status}"
         body = await r.json()
-        assert '2' in body['error'] and '1' in body['error'], f"error must show both counts: {body['error']!r}"
+        assert 'keyword' in body['error']
+
+        for bad_body in ({}, {'keyword': 'keeper', 'joke': 'stays'}, {'keyword': 5}):
+            r = await client.delete('/api/db/table/joke', json=bad_body)
+            assert r.status == 400, f"body {bad_body!r} must be a JSON 400, got {r.status}"
+
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert len(rows) == 1 and rows[0]['keyword'] == 'keeper', 'rejected shapes must not delete the row'
 
     run_test(bot, probe)
 
@@ -572,7 +695,7 @@ def test_db_roundtrip_insert_get_delete(tmp_path):
         match = [row for row in rows if row['keyword'] == 'tulip']
         assert len(match) == 1 and match[0]['joke'] == 'deez nutz on yo head'
 
-        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ?', 'params': ['tulip']})
+        r = await client.delete('/api/db/table/joke', json={'keyword': 'tulip'})
         assert r.status == 200
 
         rows = (await (await client.get('/api/db/table/joke')).json())['rows']
@@ -651,6 +774,64 @@ def test_chat_chunking_400_chars(tmp_path):
         body = await r.json()
         assert body['sent_chunks'] > 1
         assert all(len(c) <= 500 for c in chunks)
+
+    run_test(bot, probe)
+
+
+def test_chat_cap_2001_chars_rejected_zero_sends(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+
+    async def probe(client):
+        r = await client.post('/api/test/chat', json={'message': 'a' * 2001})
+        assert r.status == 400, f"2001 char body must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'character limit' in body['error']
+
+    run_test(bot, probe)
+    assert sent == [], 'over-cap message must not fire any sendChatMessage call'
+
+
+def test_chat_1500_chars_sends_and_reports_chunks(tmp_path):
+    bot = make_bot(str(tmp_path))
+    chunks = []
+
+    async def fake_send(message, broadcaster_id=None):
+        chunks.append(message)
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+
+    message = ' '.join(['word%d' % i for i in range(201)])
+    assert len(message) == 1497, f"test fixture must stay just under the cap: {len(message)}"
+
+    async def probe(client):
+        r = await client.post('/api/test/chat', json={'message': message})
+        assert r.status == 200
+        body = await r.json()
+        assert body['sent_chunks'] == 4, f"1497 char message must send in four 400-char chunks, got {body['sent_chunks']}"
+
+    run_test(bot, probe)
+    assert len(chunks) == 4 and all(len(c) <= 400 for c in chunks)
+
+
+def test_preauth_joke_falls_back_to_default_jemote(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
+    bot.http.user_id = None
+
+    async def probe(client):
+        r = await client.post('/api/test/joke', json={'message': 'my fitness journey'})
+        assert r.status == 200, f"pre-auth keyword dry run must not error, got {r.status}"
+        body = await r.json()
+        assert body['matched_keyword'] == 'fitness'
+        assert body['reply'].endswith(bot.default_jemote)
 
     run_test(bot, probe)
 
@@ -913,3 +1094,113 @@ def test_config_sections_from_yaml(tmp_path):
     assert bot.channel_cache_ttl == 42.0
     assert bot.db_write_tables == ('joke',)
     assert bot.ui_cfg['status_poll_ms'] == 1234
+
+
+def test_log_buffer_caps_entry_and_quiet_repeat_connection_dump(tmp_path):
+    bot = make_bot(str(tmp_path))
+    assert deezbot._log_handler.buffer.maxlen == 1000
+
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            recs.append(record)
+
+    cap_logger = logging.getLogger('deeztest')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        deezbot._log_handler.buffer.clear()
+        for i in range(999):
+            cap_logger.warning(f'filler {i}')
+        cap_logger.warning('H' * 5000)
+        entries = list(deezbot._log_handler.buffer)
+        assert len(entries) == 1000, f"buffer must stay bounded at maxlen, got {len(entries)}"
+        assert all(len(e['msg']) <= 500 for e in entries), 'every stored entry msg must be capped at 500 chars'
+        huge = [e for e in entries if e['msg'].startswith('H')]
+        assert len(huge) == 1 and len(huge[0]['msg']) == 500, f'huge line must truncate to exactly 500, got {len(huge[0]["msg"])}'
+
+        bot.http.user_id = '8000200'
+        warn_msgs = []
+
+        class WarnCap(logging.Handler):
+            def emit(self, record):
+                if record.levelno >= logging.WARNING:
+                    warn_msgs.append(record.getMessage())
+
+        async def fake_eventsubs():
+            return {'8000200': {'id': 'ev1'}}
+
+        async def no_channels():
+            return {}
+
+        bot.connected_channels = fake_eventsubs
+        bot._get_channel_list = no_channels
+        warn_logger = logging.getLogger('bot')
+        whandler = WarnCap()
+        warn_logger.addHandler(whandler)
+        try:
+            async def main():
+                await bot.check_connections()
+                await bot.check_connections()
+                await bot.check_connections()
+            asyncio.run(main())
+        finally:
+            warn_logger.removeHandler(whandler)
+
+        conn_dumps = [m for m in warn_msgs if 'Current connections' in m]
+        assert len(conn_dumps) == 1, f"unchanged connection set must log the dump exactly once across cycles, got {len(conn_dumps)}"
+        assert "'8000200'" in conn_dumps[0], f'dump must name the connected ids: {conn_dumps[0]}'
+    finally:
+        cap_logger.removeHandler(handler)
+
+
+def test_jemote_arg_validation_no_onair_errors(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+    bot.http.user_id = '8000100'
+    bot.cmd_jemote._rate_limit_state.clear()
+
+    own_channel = {'broadcaster_id': '8000100', 'broadcaster_user_name': 'botchan'}
+    users = {
+        'noargs': {'user_id': '9000101', 'username': 'nobody'},
+        'overlong': {'user_id': '9000102', 'username': 'toolong'},
+        'withspace': {'user_id': '9000103', 'username': 'hasgap'},
+        'valid': {'user_id': '9000104', 'username': 'goodone'},
+    }
+
+    errors = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.ERROR:
+                errors.append(record)
+
+    cap_logger = logging.getLogger('commands')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        async def main():
+            await bot.cmd_jemote(users['noargs'], own_channel, [])
+            await bot.cmd_jemote(users['overlong'], own_channel, ['x' * 33])
+            await bot.cmd_jemote(users['withspace'], own_channel, ['two words'])
+            assert sent == [], 'rejected shapes must not send any chat message or raise'
+
+            await bot.cmd_jemote(users['valid'], own_channel, ['GOTTEM'])
+        asyncio.run(main())
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert errors == [], f"jemote dispatches must not log exceptions, got {[r.getMessage() for r in errors]}"
+    assert sent and 'GOTTEM I like it' in sent[0][0], f'valid emote must still be acked: {sent}'
+    rows = [row for row in (asyncio.run(bot.storage.query('channels'))) if str(row['user_id']) == '9000104']
+    assert len(rows) == 1 and rows[0]['jemote'] == 'GOTTEM'
+    rejected_ids = {'9000101', '9000102', '9000103'}
+    all_rows = asyncio.run(bot.storage.query('channels'))
+    assert not any(str(row['user_id']) in rejected_ids for row in all_rows), 'rejected shapes must not store a channel row'

@@ -28,7 +28,7 @@ async function refreshChannels() {
     b.title = `stop watching channel ${c.login || c.user_id}`;
     b.addEventListener('click', async () => {
       if (!confirm(`stop watching channel ${c.login || c.user_id}?`)) return;
-      try { await del('/api/db/table/channels', { where: 'user_id = ?', params: [String(c.user_id)] }); refreshChannels(); refreshStatus(); } catch (_) {}
+      try { await del('/api/db/table/channels', { user_id: String(c.user_id) }); refreshChannels(); refreshStatus(); } catch (_) {}
     });
     actTd.append(b);
     tr.append(actTd);
