@@ -9,7 +9,7 @@ Twitch bot that tells "deez nutz" jokes in chat channels.
 - Multi-channel support via join/leave commands (own channel only)
 - Self joke opt-out: `!ignore` / `!unignore` stop or resume jokes for yourself, no argument needed
 - Per-channel customizable emote for joke delivery
-- Rate limiting on all commands (1 call per 15 seconds)
+- Rate limiting per user and per command: bot commands are limited to 1 call in 15 seconds, the built-in help/commands listing is limited to 1 call in 30 seconds
 
 ## Commands
 
