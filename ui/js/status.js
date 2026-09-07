@@ -1,3 +1,8 @@
+// finding 4 (Pass C): rendered spans in #log-view are pruned to this budget, newest lines kept since they read first
+const LOG_DOM_CAP = 500;
+// incremental /api/logs fetch size after the initial full load; the server ring buffer is much larger, only the tail matters per poll
+const LOG_POLL_WINDOW = 100;
+
 // manual callers (post-mutation refreshes from jokes/channels/ignores) call refreshStatus directly and bypass this gate on purpose
 function statusPollAllowed() {
   return activeTab === 'status' && document.visibilityState === 'visible';
@@ -84,6 +89,11 @@ function appendLogLines(entries) {
     if (!levelPass(e)) continue;
     view.append(el('span', logLineText(e), `log-line log-${e.level.toLowerCase()}`), '\n');
   }
+  while (view.querySelectorAll('span').length > LOG_DOM_CAP) {
+    const first = view.querySelector('span.log-line');
+    if (first.nextSibling && first.nextSibling.nodeType === Node.TEXT_NODE && first.nextSibling.textContent === '\n') first.parentNode.removeChild(first.nextSibling);
+    first.remove();
+  }
   if (logState.atBottom) view.scrollTop = view.scrollHeight;
 }
 
@@ -97,15 +107,17 @@ function renderLogsFull() {
 async function pollLogs(full) {
   if (activeTab !== 'status') return;
   let body;
-  try { body = await api(`/api/logs?lines=${uiCfg.log_buffer_size || 1000}`); } catch (_) { return; }
-  logCache = body.entries || [];
+  try { body = await api(`/api/logs?lines=${full ? uiCfg.log_buffer_size || 1000 : LOG_POLL_WINDOW}`); } catch (_) { return; }
   $('#log-count').textContent = `${body.total} buffered`;
-  if (full) { renderLogsFull(); return; }
-  const fresh = logCache.filter(e => e.seq > logState.lastSeq);
+  const entries = body.entries || [];
+  if (full) { logCache = entries; renderLogsFull(); return; }
+  const fresh = entries.filter(e => e.seq > logState.lastSeq);
+  // gap between last seen seq and the oldest entry returned: buffer wrapped or a burst larger than the tail window, so reload full history instead of appending partial data
+  if (fresh.length && entries[0].seq > logState.lastSeq + 1) { pollLogs(true); return; }
   appendLogLines(fresh);
   if (fresh.length) logState.lastSeq = fresh[fresh.length - 1].seq;
 }
 
 $('#log-view').addEventListener('scroll', e => { logState.atBottom = e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 8; });
 $('#btn-log-refresh').addEventListener('click', () => pollLogs(true));
-$('#log-level').addEventListener('change', e => { logState.minLevel = e.target.value; renderLogsFull(); });
+$('#log-level').addEventListener('change', e => { logState.minLevel = e.target.value; pollLogs(true); });
