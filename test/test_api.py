@@ -545,17 +545,87 @@ def test_db_delete_shape_validation(tmp_path):
 
     async def probe(client):
         r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ?', 'params': 'abc'})
-        assert r.status == 400, f"string params must be a JSON 400, got {r.status}"
+        assert r.status == 400, f"old-style where/params body must be a JSON 400, got {r.status}"
         body = await r.json()
-        assert body['status'] is False and 'list' in body['error']
+        assert body['status'] is False and 'primary-key' in body['error']
 
         rows = (await (await client.get('/api/db/table/joke')).json())['rows']
         assert [row for row in rows if row['keyword'] == 'victim'], 'failed delete must not touch storage'
 
-        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ? AND user_id = ?', 'params': ['x']})
-        assert r.status == 400, f"placeholder/param mismatch must be a JSON 400, got {r.status}"
+        r = await client.delete('/api/db/table/joke', json={'where': '1=1', 'params': []})
+        assert r.status == 400, f"mass-delete body must be a JSON 400, got {r.status}"
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert len(rows) == 1 and rows[0]['keyword'] == 'victim', 'old-style mass delete must leave every row intact'
+
+    run_test(bot, probe)
+
+
+def test_db_delete_injection_replays(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'alpha', 'joke': 'one'}))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'beta', 'joke': 'two'}))
+    asyncio.run(bot.storage.save_token('twitch', {'token_json': '{"access_token": "leaked-material"}'}))
+
+    async def tokens_row():
+        rows = await bot.storage.query('tokens')
+        return [row for row in rows if row.get('name') == 'twitch']
+
+    before = asyncio.run(tokens_row())
+    assert len(before) == 1, 'test needs exactly one seeded tokens row'
+
+    async def probe(client):
+        r = await client.delete('/api/db/table/joke', json={'where': '1=1 AND EXISTS (SELECT 1 FROM tokens WHERE token_json LIKE ?)', 'params': ['%leaked-material%']})
+        assert r.status == 400, f"subquery oracle body must be a JSON 400, got {r.status}"
+
+        r = await client.delete('/api/db/table/tokens', json={'name': 'twitch'})
+        assert r.status == 403, 'protected table delete must stay 403 even with the structured body'
+
+    run_test(bot, probe)
+
+    after = asyncio.run(tokens_row())
+    assert after == before, 'tokens row must be byte-identical after failed oracle deletes'
+    rows = asyncio.run(bot.storage.query('joke'))
+    assert len(rows) == 2, 'both joke rows must survive the injection replays'
+
+
+def test_db_delete_single_pk_each_writable_table(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def probe(client):
+        r = await client.post('/api/db/table/joke', json={'keyword': 'tulip', 'joke': 'deez nutz on yo head'})
+        assert r.status == 200
+        r = await client.post('/api/db/table/ignore', json={'user_id': '5500001', 'ignore': 'True'})
+        assert r.status == 200
+        r = await client.post('/api/db/table/channels', json={'user_id': '5500002', 'jemote': 'Kappa'})
+        assert r.status == 200
+
+        for table, pk in (('joke', {'keyword': 'tulip'}), ('ignore', {'user_id': '5500001'}), ('channels', {'user_id': '5500002'})):
+            r = await client.delete(f'/api/db/table/{table}', json=pk)
+            assert r.status == 200, f"structured single-PK delete on {table} must succeed, got {r.status}"
+
+        for table in ('joke', 'ignore', 'channels'):
+            rows = (await (await client.get(f'/api/db/table/{table}')).json())['rows']
+            assert rows == [], f'{table} must be empty after single-row deletes'
+
+    run_test(bot, probe)
+
+
+def test_db_delete_rejects_wrong_pk_and_shapes(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'keeper', 'joke': 'stays'}))
+
+    async def probe(client):
+        r = await client.delete('/api/db/table/joke', json={'joke': 'stays'})
+        assert r.status == 400, f"non-PK column body must be a JSON 400, got {r.status}"
         body = await r.json()
-        assert '2' in body['error'] and '1' in body['error'], f"error must show both counts: {body['error']!r}"
+        assert 'keyword' in body['error']
+
+        for bad_body in ({}, {'keyword': 'keeper', 'joke': 'stays'}, {'keyword': 5}):
+            r = await client.delete('/api/db/table/joke', json=bad_body)
+            assert r.status == 400, f"body {bad_body!r} must be a JSON 400, got {r.status}"
+
+        rows = (await (await client.get('/api/db/table/joke')).json())['rows']
+        assert len(rows) == 1 and rows[0]['keyword'] == 'keeper', 'rejected shapes must not delete the row'
 
     run_test(bot, probe)
 
@@ -572,7 +642,7 @@ def test_db_roundtrip_insert_get_delete(tmp_path):
         match = [row for row in rows if row['keyword'] == 'tulip']
         assert len(match) == 1 and match[0]['joke'] == 'deez nutz on yo head'
 
-        r = await client.delete('/api/db/table/joke', json={'where': 'keyword = ?', 'params': ['tulip']})
+        r = await client.delete('/api/db/table/joke', json={'keyword': 'tulip'})
         assert r.status == 200
 
         rows = (await (await client.get('/api/db/table/joke')).json())['rows']
@@ -651,6 +721,64 @@ def test_chat_chunking_400_chars(tmp_path):
         body = await r.json()
         assert body['sent_chunks'] > 1
         assert all(len(c) <= 500 for c in chunks)
+
+    run_test(bot, probe)
+
+
+def test_chat_cap_2001_chars_rejected_zero_sends(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+
+    async def probe(client):
+        r = await client.post('/api/test/chat', json={'message': 'a' * 2001})
+        assert r.status == 400, f"2001 char body must be a JSON 400, got {r.status}"
+        body = await r.json()
+        assert body['status'] is False and 'character limit' in body['error']
+
+    run_test(bot, probe)
+    assert sent == [], 'over-cap message must not fire any sendChatMessage call'
+
+
+def test_chat_1500_chars_sends_and_reports_chunks(tmp_path):
+    bot = make_bot(str(tmp_path))
+    chunks = []
+
+    async def fake_send(message, broadcaster_id=None):
+        chunks.append(message)
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+
+    message = ' '.join(['word%d' % i for i in range(201)])
+    assert len(message) == 1497, f"test fixture must stay just under the cap: {len(message)}"
+
+    async def probe(client):
+        r = await client.post('/api/test/chat', json={'message': message})
+        assert r.status == 200
+        body = await r.json()
+        assert body['sent_chunks'] == 4, f"1497 char message must send in four 400-char chunks, got {body['sent_chunks']}"
+
+    run_test(bot, probe)
+    assert len(chunks) == 4 and all(len(c) <= 400 for c in chunks)
+
+
+def test_preauth_joke_falls_back_to_default_jemote(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))
+    bot.http.user_id = None
+
+    async def probe(client):
+        r = await client.post('/api/test/joke', json={'message': 'my fitness journey'})
+        assert r.status == 200, f"pre-auth keyword dry run must not error, got {r.status}"
+        body = await r.json()
+        assert body['matched_keyword'] == 'fitness'
+        assert body['reply'].endswith(bot.default_jemote)
 
     run_test(bot, probe)
 

@@ -17,7 +17,7 @@ async function loadIgnores() {
       const b = el('button', 'remove');
       b.addEventListener('click', async () => {
         if (!confirm(`remove ${u.login || u.user_id} from ignore list?`)) return;
-        try { await del('/api/db/table/ignore', { where: 'user_id = ?', params: [String(u.user_id)] }); loadIgnores(); } catch (_) {}
+        try { await del('/api/db/table/ignore', { user_id: String(u.user_id) }); loadIgnores(); } catch (_) {}
       });
       actTd.append(b);
     }

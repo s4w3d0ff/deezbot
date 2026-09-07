@@ -64,16 +64,21 @@ class WebDbMixin:
         body = await _json_body(request)
         if body is None:
             return jerr({"status": False, "error": "missing or invalid JSON body"}, 400)
-        where = body.get('where')
-        if not where:
-            return jerr({"status": False, "error": "missing 'where' clause"}, 400)
-        params_raw = body.get('params')
-        if params_raw is not None and not isinstance(params_raw, list):
-            return jerr({"status": False, "error": "'params' must be a list"}, 400)
-        params = tuple(params_raw or ())
-        placeholders = where.count('?')
-        if placeholders != len(params):
-            return jerr({"status": False, "error": f"'where' has {placeholders} placeholder(s) but {len(params)} param(s) provided"}, 400)
-        await self.storage.delete(table, where=where, params=params)
-        logger.info(f"UI db delete from {table}: {where} {params}")
+        if len(body) != 1:
+            return jerr({"status": False, "error": "body must be exactly one key/value pair mapping the table primary-key column to its value"}, 400)
+        pkcol = self.storage._clean_str(next(iter(body)))
+        val = next(iter(body.values()))
+        if not isinstance(val, str):
+            return jerr({"status": False, "error": f"primary key value for '{pkcol}' must be a string"}, 400)
+        async with aiosqlite.connect(self.storage.db_path) as db:
+            async with db.execute(f"PRAGMA table_info({table})") as cur:
+                info = [row async for row in cur]
+        if not info:
+            return jerr({"status": False, "error": f"table '{table}' does not exist"}, 400)
+        pk_rows = [row for row in info if row[5]]
+        expected_pk = (pk_rows[0][1] if pk_rows else info[0][1])
+        if pkcol != expected_pk:
+            return jerr({"status": False, "error": f"body must map primary-key column '{expected_pk}' to its value"}, 400)
+        await self.storage.delete(table, where=f"{expected_pk} = ?", params=(val,))
+        logger.info(f"UI db delete from {table}: {expected_pk}={val}")
         return self.app.response_json({"status": True, "deleted_from": table})

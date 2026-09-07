@@ -101,7 +101,7 @@ async function deleteRawRow(row, pkCol) {
   const val = String(row[pkCol] ?? '');
   if (!confirm(`delete this ${rawState.current} row?\n${pkCol} = ${val}`)) return;
   try {
-    await del(`/api/db/table/${encodeURIComponent(rawState.current)}`, { where: `${pkCol} = ?`, params: [val] });
+    await del(`/api/db/table/${encodeURIComponent(rawState.current)}`, { [pkCol]: val });
     loadRawRows();
     loadRawTables();
   } catch (_) {}
