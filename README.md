@@ -9,7 +9,7 @@ Twitch bot that tells "deez nutz" jokes in chat channels.
 - Multi-channel support via join/leave commands (own channel only)
 - Self joke opt-out: `!ignore` / `!unignore` stop or resume jokes for yourself, no argument needed
 - Per-channel customizable emote for joke delivery
-- Rate limiting on all commands (1 call per 15 seconds)
+- Rate limiting per user and per command: bot commands are limited to 1 call in 15 seconds, the built-in help/commands listing is limited to 1 call in 30 seconds
 
 ## Commands
 
@@ -149,7 +149,6 @@ deezbot/
 ├── .env                  # Twitch credentials (gitignored)
 ├── deez_venv/            # Virtual environment (gitignored)
 ├── install.sh / run.sh   # Linux setup/run scripts
-├── install.bat / run.bat # Windows equivalents
 └── requirements.txt      # Python dependencies
 ```
 
@@ -163,7 +162,7 @@ deezbot/
 ## Notes
 
 - Bot ignores messages from itself, commands, and ignored users
-- Joke cycle resets randomly after hitting jcountmax (between jdelay[0] and jdelay[1])
+- Joke cycle resets randomly after hitting next_joke_after (a message count between jdelay[0] and jdelay[1])
 - Runtime cache files in db/ are recreated automatically if deleted
 - `browser` in cfg.yaml is platform-specific (e.g. firefox); omit it for the system default browser
 - Websocket connection state at `/api/status` is read defensively: framework internal renames degrade the indicator to false instead of breaking every status poll

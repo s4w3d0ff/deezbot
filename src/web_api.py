@@ -73,8 +73,8 @@ class WebApiMixin:
                 "cooldown_seconds": self.jlimit,
                 "seconds_since_last_joke": seconds_since_last_joke,
                 "keyword_cooldown_remaining": keyword_cooldown_remaining,
-                "random_counter": self.jcount,
-                "random_next_at": self.jcountmax,
+                "random_counter": self.msg_since_joke,
+                "random_next_at": self.next_joke_after,
             },
         })
 

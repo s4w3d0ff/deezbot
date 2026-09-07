@@ -12,6 +12,9 @@ else
     exit 1
 fi
 
-export PYTHONPATH="$SCRIPT_DIR/deez_venv/lib/python3.14/site-packages:$PYTHONPATH"
+if [ ! -x "$SCRIPT_DIR/deez_venv/bin/python3" ]; then
+    echo "ERROR: deez_venv interpreter not found; run install.sh"
+    exit 1
+fi
 
 exec -a deezbot "$SCRIPT_DIR/deez_venv/bin/python3" "$SCRIPT_DIR/src/bot.py"
