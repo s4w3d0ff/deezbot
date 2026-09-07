@@ -1094,3 +1094,54 @@ def test_config_sections_from_yaml(tmp_path):
     assert bot.channel_cache_ttl == 42.0
     assert bot.db_write_tables == ('joke',)
     assert bot.ui_cfg['status_poll_ms'] == 1234
+
+
+def test_jemote_arg_validation_no_onair_errors(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+    bot.http.user_id = '8000100'
+    bot.cmd_jemote._rate_limit_state.clear()
+
+    own_channel = {'broadcaster_id': '8000100', 'broadcaster_user_name': 'botchan'}
+    users = {
+        'noargs': {'user_id': '9000101', 'username': 'nobody'},
+        'overlong': {'user_id': '9000102', 'username': 'toolong'},
+        'withspace': {'user_id': '9000103', 'username': 'hasgap'},
+        'valid': {'user_id': '9000104', 'username': 'goodone'},
+    }
+
+    errors = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.ERROR:
+                errors.append(record)
+
+    cap_logger = logging.getLogger('commands')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        async def main():
+            await bot.cmd_jemote(users['noargs'], own_channel, [])
+            await bot.cmd_jemote(users['overlong'], own_channel, ['x' * 33])
+            await bot.cmd_jemote(users['withspace'], own_channel, ['two words'])
+            assert sent == [], 'rejected shapes must not send any chat message or raise'
+
+            await bot.cmd_jemote(users['valid'], own_channel, ['GOTTEM'])
+        asyncio.run(main())
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert errors == [], f"jemote dispatches must not log exceptions, got {[r.getMessage() for r in errors]}"
+    assert sent and 'GOTTEM I like it' in sent[0][0], f'valid emote must still be acked: {sent}'
+    rows = [row for row in (asyncio.run(bot.storage.query('channels'))) if str(row['user_id']) == '9000104']
+    assert len(rows) == 1 and rows[0]['jemote'] == 'GOTTEM'
+    rejected_ids = {'9000101', '9000102', '9000103'}
+    all_rows = asyncio.run(bot.storage.query('channels'))
+    assert not any(str(row['user_id']) in rejected_ids for row in all_rows), 'rejected shapes must not store a channel row'
