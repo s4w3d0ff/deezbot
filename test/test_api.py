@@ -71,6 +71,59 @@ def test_before_login_starts_steady_state_server(tmp_path):
     asyncio.run(main())
 
 
+def test_joke_schema_fresh_db_auto_creates(tmp_path):
+    bot = make_bot(str(tmp_path))
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.CRITICAL:
+                recs.append(record)
+
+    cap_logger = logging.getLogger('bot')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        asyncio.run(bot._check_joke_schema())
+        jokes = asyncio.run(bot._get_jokes())
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert recs == [], f"fresh db must not log schema drift, got {[r.getMessage() for r in recs]}"
+    assert jokes == {}
+
+
+def test_joke_schema_drift_logs_critical_and_dry_run_errors(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('joke', {'word': 'fitness', 'text': 'dick fit'}))
+
+    recs = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.CRITICAL:
+                recs.append(record)
+
+    cap_logger = logging.getLogger('bot')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        asyncio.run(bot._check_joke_schema())
+
+        async def probe(client):
+            r = await client.post('/api/test/joke', json={'message': 'my fitness journey'})
+            assert r.status >= 500, f"drifted schema dry run must be an error response, got {r.status}"
+
+        run_test(bot, probe)
+    finally:
+        cap_logger.removeHandler(handler)
+
+    crit = [r for r in recs if 'schema drift' in r.getMessage()]
+    assert len(crit) == 1, f"drifted schema must log exactly one CRITICAL, got {len(crit)}"
+    msg = crit[0].getMessage()
+    assert 'word' in msg and 'text' in msg, f"CRITICAL must name the actual columns found: {msg}"
+
+
 def test_status_endpoint(tmp_path):
     bot = make_bot(str(tmp_path))
     asyncio.run(bot.storage.insert('joke', {'keyword': 'fitness', 'joke': 'dick fit'}))

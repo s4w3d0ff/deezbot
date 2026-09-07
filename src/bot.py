@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import os
+import aiosqlite
 from poolguy import CommandBot
 from config import loadYAML, DEFAULT_WRITE_TABLES
 from logbuffer import _log_handler, LOG_MAXLEN
@@ -67,6 +68,10 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         if same_origin_guard not in self.app.app.middlewares:
             self.app.app.middlewares.append(same_origin_guard)
 
+    async def before_login(self):
+        await super().before_login()
+        await self._check_joke_schema()
+
     def _reset_joke_window(self):
         self.lastjoke = 0
         self.msg_since_joke = 0
@@ -123,6 +128,16 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
     async def _get_jokes(self):
         r = await self.storage.query("joke")
         return {row["keyword"]: row["joke"] for row in r}
+
+    async def _check_joke_schema(self):
+        async with aiosqlite.connect(self.storage.db_path) as db:
+            await db.execute('CREATE TABLE IF NOT EXISTS joke (keyword TEXT, joke TEXT)')
+            await db.commit()
+            async with db.execute('PRAGMA table_info(joke)') as cur:
+                info = [row async for row in cur]
+        columns = {row[1] for row in info}
+        if 'keyword' not in columns or 'joke' not in columns:
+            logger.critical(f"joke table schema drift: expected columns keyword and joke, found {sorted(columns)}")
 
     async def _enrich_channels(self):
         chans = await self._get_channel_list()
