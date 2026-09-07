@@ -1,6 +1,6 @@
-spacy
-poolguy @ git+https://github.com/s4w3d0ff/pool-guy.git@dev
-aiosqlite
-rich
-pyyaml
-pytest
+spacy==3.8.13
+poolguy @ git+https://github.com/s4w3d0ff/pool-guy.git@5e3906169b60d6b3735f25f3454d77be0ede4569
+aiosqlite==0.22.1
+rich==15.0.0
+PyYAML==6.0.3
+pytest==9.1.1
