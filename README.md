@@ -149,7 +149,6 @@ deezbot/
 ├── .env                  # Twitch credentials (gitignored)
 ├── deez_venv/            # Virtual environment (gitignored)
 ├── install.sh / run.sh   # Linux setup/run scripts
-├── install.bat / run.bat # Windows equivalents
 └── requirements.txt      # Python dependencies
 ```
 
