@@ -1,16 +1,44 @@
 import asyncio
 import logging
 import os
+from aiohttp import web as aweb
 from poolguy import route
 from logbuffer import _log_handler, LOG_MAXLEN
+from web_api import jerr
 
 logger = logging.getLogger(__name__)
+
+STATE_CHANGING_METHODS = ('POST', 'PUT', 'DELETE', 'PATCH')
+
+
+def _origin_host(origin):
+    parts = origin.split('://', 1)
+    if len(parts) != 2 or not parts[1]:
+        return None
+    return parts[1].split('/', 1)[0].lower()
+
+
+@aweb.middleware
+async def same_origin_guard(request, handler):
+    if request.method in STATE_CHANGING_METHODS:
+        origin = request.headers.get('Origin')
+        if origin is not None:
+            host = _origin_host(origin)
+            req_host = (request.host or '').lower()
+            if host != req_host:
+                logger.warning(f"cross-origin {request.method} {request.path} rejected from Origin '{origin}'")
+                return aweb.json_response({'status': False, 'error': 'cross-origin state changing request rejected'}, status=403)
+    return await handler(request)
 
 
 class WebManageMixin:
     @route('/api/logs')
     async def api_logs(self, request):
-        lines = int(request.query.get('lines') or 200)
+        lines_raw = request.query.get('lines') or 200
+        try:
+            lines = int(lines_raw)
+        except ValueError:
+            return jerr({"status": False, "error": f"invalid 'lines' parameter"}, 400)
         lines = max(1, min(lines, LOG_MAXLEN))
         buf = _log_handler.buffer
         entries = list(buf)[-lines:]
@@ -54,6 +82,6 @@ class WebManageMixin:
             try:
                 await self.check_connections()
             except Exception as e:
-                logger.error("deez_loop Error:\n{e}")
+                logger.exception(f"deez_loop Error:\n{e}")
             await asyncio.sleep(self.loop_delay)
         logger.warning(f'deez_loop stopped')

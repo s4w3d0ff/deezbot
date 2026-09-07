@@ -13,6 +13,7 @@ jdelay: [10, 20]          # random-joke count window per cycle (min, max)
 jlimit: 600               # seconds between keyword jokes (cooldown window)
 loop_delay: 300           # seconds between connection health checks
 default_jemote: Kappa     # jemote used when a channel has none stored
+cmd_prefix: ['!', '~']    # chat command prefixes loaded at bot start (one character per entry)
 
 web:
   host: localhost         # control panel + OAuth callback bind host

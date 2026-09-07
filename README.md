@@ -6,21 +6,23 @@ Twitch bot that tells "deez nutz" jokes in chat channels.
 
 - Spontaneous jokes using spaCy noun-chunk replacement (replaces a random noun in user messages with "deez nutz")
 - Keyword-triggered preset jokes (ligma, kansas, etc.)
-- Multi-channel support via join/leave commands
-- User ignore list to mute specific chatters
+- Multi-channel support via join/leave commands (own channel only)
+- Self joke opt-out: `!ignore` / `!unignore` stop or resume jokes for yourself, no argument needed
 - Per-channel customizable emote for joke delivery
-- Rate limiting on all commands (1 call per 15 seconds)
+- Rate limiting per user and per command: bot commands are limited to 1 call in 15 seconds, the built-in help/commands listing is limited to 1 call in 30 seconds
 
 ## Commands
 
+Command prefixes come from the `cmd_prefix` key in `cfg.yaml` (default: `!`). Every command row below uses that prefix. No admin-style permissions exist; every command affects only the caller's own preferences.
+
 | Command | Description | Permission |
 |---------|-------------|------------|
-| `/jemote <emote>` | Change channel emote used in jokes | Channel owner or bot itself |
-| `/join` | Add this channel to bot's rotation | Bot's own channel |
-| `/leave` | Remove this channel from rotation | Channel owner or bot itself |
-| `/ignore <user>` | Mute a chatter permanently | Anyone |
-| `/unignore <user>` | Unmute a previously ignored chatter | Anyone |
-| `/help` | List available commands | Anyone |
+| `!jemote <emote>` | Set your own emote used for joke delivery | Bot's own channel only |
+| `!join` | Add yourself to the bot's rotation | Bot's own channel only |
+| `!leave` | Remove yourself from the bot's rotation | Bot's own channel only |
+| `!ignore` | Self opt-out: stop joke triggers for you, no user argument | Anyone, in any channel where the bot can see messages |
+| `!unignore` | Self opt-in: re-enable joke triggers for you, no user argument | Anyone, in any channel where the bot can see messages |
+| `!help` | List available commands (alias of `!commands`) | Anyone |
 
 ## Setup
 
@@ -52,6 +54,7 @@ jdelay: [10, 20]          # random-joke count window per cycle (min, max)
 jlimit: 600               # seconds between keyword jokes (cooldown window)
 loop_delay: 300           # seconds between connection health checks
 default_jemote: Kappa     # jemote used when a channel has none stored
+cmd_prefix: ['!', '~']    # chat command prefixes loaded at bot start (one character per entry)
 
 web:
   host: localhost         # control panel + OAuth callback bind host
@@ -113,7 +116,7 @@ JSON endpoints behind the UI:
 | POST | `/api/db/table/{table}` | upsert insert (whitelist: `joke`, `ignore`, `channels`) |
 | DELETE | `/api/db/table/{table}` | delete by `where` + `params` (same whitelist) |
 
-The server binds localhost only — no auth layer, do not expose the port. Writes to framework tables (`tokens`, `queue`, eventsub internals) return 403; reads stay open for all tables.
+The server binds localhost by default (`web.host` in `cfg.yaml`). No auth layer, do not expose the port. Framework secret tables (`tokens`, `queue`) are excluded from both the table listing and direct reads (403); all other tables remain readable in the raw DB browser. State changing requests (POST/PUT/DELETE/PATCH) carry an Origin check: if a browser sends an Origin whose host part differs from the request Host, the route answers 403 with the JSON error shape and nothing else runs; scripts and CLI tooling that send no Origin header are unaffected, as are all GET reads. If `web.host` is set beyond loopback, startup logs one warning that the panel and OAuth callback become reachable on other machines (cross-origin writes stay blocked by the origin rule, but the surface itself is exposed).
 
 ## Structure
 
@@ -146,7 +149,6 @@ deezbot/
 ├── .env                  # Twitch credentials (gitignored)
 ├── deez_venv/            # Virtual environment (gitignored)
 ├── install.sh / run.sh   # Linux setup/run scripts
-├── install.bat / run.bat # Windows equivalents
 └── requirements.txt      # Python dependencies
 ```
 
@@ -160,6 +162,7 @@ deezbot/
 ## Notes
 
 - Bot ignores messages from itself, commands, and ignored users
-- Joke cycle resets randomly after hitting jcountmax (between jdelay[0] and jdelay[1])
+- Joke cycle resets randomly after hitting next_joke_after (a message count between jdelay[0] and jdelay[1])
 - Runtime cache files in db/ are recreated automatically if deleted
 - `browser` in cfg.yaml is platform-specific (e.g. firefox); omit it for the system default browser
+- Websocket connection state at `/api/status` is read defensively: framework internal renames degrade the indicator to false instead of breaking every status poll

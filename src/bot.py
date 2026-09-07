@@ -10,7 +10,7 @@ from jokes import configure_spacy, replace_random_noun_chunk, DEFAULT_SPACY_MODE
 from alerts import ChannelChatMessageAlert
 from commands import CommandsMixin
 from web_api import WebApiMixin, _ignore_truthy
-from web_manage import WebManageMixin
+from web_manage import WebManageMixin, same_origin_guard
 from web_db import WebDbMixin
 
 logger = logging.getLogger(__name__)
@@ -25,15 +25,22 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
             raise ValueError("Environment variables DEEZ_CLIENT_ID and DEEZ_CLIENT_SECRET are required")
         cfg = dict(cfg or {})
         for key in ('scopes', 'channels', 'storage', 'browser', 'redirect_uri',
-                    'jdelay', 'jlimit', 'loop_delay', 'default_jemote', 'spacy_model'):
+                    'jdelay', 'jlimit', 'loop_delay', 'default_jemote', 'spacy_model', 'cmd_prefix'):
             if key not in cfg and key in kwargs:
                 cfg[key] = kwargs.pop(key)
 
         web_cfg = dict(cfg.get('web') or {})
         self.web_host = web_cfg.get('host', 'localhost')
+        if str(self.web_host).lower() not in ('localhost', '127.0.0.1', '::1'):
+            logger.warning(f"web panel bound to {self.web_host}: panel and OAuth callback are reachable beyond this machine; cross-origin writes are blocked by origin, but the surface itself is exposed")
         self.web_port = int(web_cfg.get('port', 5000))
         self.web_static_dirs = list(web_cfg.get('static_dirs') or ['ui'])
         _log_handler.resize(int(web_cfg.get('log_buffer_size') or LOG_MAXLEN))
+
+        cmd_prefix_raw = cfg.get('cmd_prefix') or ['!', '~']
+        if not isinstance(cmd_prefix_raw, (list, tuple)):
+            cmd_prefix_raw = [cmd_prefix_raw]
+        self.cmd_prefix = list(dict.fromkeys(str(p).strip() for p in cmd_prefix_raw if str(p).strip())) or ['!', '~']
 
         configure_spacy(cfg.get('spacy_model'))
         self.default_jemote = cfg.get('default_jemote') or 'Kappa'
@@ -46,19 +53,24 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
         pg_cfg['client_id'] = client_id
         pg_cfg['client_secret'] = client_secret
         alert_objs = kwargs.pop('alert_objs', None) or {'channel.chat.message': ChannelChatMessageAlert}
-        super().__init__(twitch_config=pg_cfg, alert_objs=alert_objs, **kwargs)
+        super().__init__(cmd_prefix=self.cmd_prefix, twitch_config=pg_cfg, alert_objs=alert_objs, **kwargs)
         self.jdelay = list(cfg.get('jdelay') or [4, 15])
-        self.jcount = 0
-        self.jcountmax = random.randint(*self.jdelay)
+        self.msg_since_joke = 0
+        self.next_joke_after = random.randint(*self.jdelay)
         self.loop_delay = int(cfg.get('loop_delay') or 300)
         self.jlimit = float(cfg.get('jlimit') or 20)
         self.lastjoke = 0
         self._started_at = time.time()
 
-    def _resetjcount(self):
+    def _setup(self):
+        super()._setup()
+        if same_origin_guard not in self.app.app.middlewares:
+            self.app.app.middlewares.append(same_origin_guard)
+
+    def _reset_joke_window(self):
         self.lastjoke = 0
-        self.jcount = 0
-        self.jcountmax = random.randint(*self.jdelay)
+        self.msg_since_joke = 0
+        self.next_joke_after = random.randint(*self.jdelay)
 
     async def get_jemote(self, u_id):
         chans = await self._get_channel_list()
@@ -69,22 +81,22 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
     async def makeJoke(self, data):
         message = data['message']['text']
         u_id = data["broadcaster_user_id"]
-        self.jcount += 1
+        self.msg_since_joke += 1
         # keep from spamming jokes if keywords are being used
         jokes = await self._get_jokes()
         if time.time() - self.lastjoke >= self.jlimit:
             emote = await self.get_jemote(u_id)
             for key, joke in jokes.items():
                 if key in message.lower():
-                    self._resetjcount()
+                    self._reset_joke_window()
                     self.lastjoke = time.time()
                     return f"{joke}! {emote}"
         # make random joke
-        if self.jcount >= self.jcountmax:
+        if self.msg_since_joke >= self.next_joke_after:
             emote = await self.get_jemote(u_id)
-            r = replace_random_noun_chunk(message, "deez nutz")
+            r = await replace_random_noun_chunk(message, "deez nutz")
             if r:
-                self._resetjcount()
+                self._reset_joke_window()
                 self.lastjoke = time.time()
                 return f"{r} {emote}"
 
@@ -127,7 +139,7 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
                 try:
                     streams = await self.http.getStreams(user_id=ids, type='live', first=100)
                     for s in streams:
-                        live_map[s['id']] = {'is_live': True, 'viewers': s.get('viewer_count') or 0, 'title': s.get('title') or ''}
+                        live_map[s['user_id']] = {'is_live': True, 'viewers': s.get('viewer_count') or 0, 'title': s.get('title') or ''}
                 except Exception as e:
                     logger.warning(f"Channel stream status check failed: {e}")
             self._chan_info_map, self._chan_live_map = info_map, live_map
