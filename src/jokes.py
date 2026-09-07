@@ -1,4 +1,6 @@
+import asyncio
 import random
+import weakref
 import logging
 import spacy
 
@@ -7,25 +9,35 @@ logger = logging.getLogger(__name__)
 DEFAULT_SPACY_MODEL = 'en_core_web_sm'
 _nlp = None
 _spacy_model = None
+_load_attempted = False
+_load_locks = weakref.WeakKeyDictionary()
 
 
 def configure_spacy(model):
-    global _nlp, _spacy_model
-    if model != _spacy_model:
-        _spacy_model = model or DEFAULT_SPACY_MODEL
-        _nlp = None
+    global _nlp, _spacy_model, _load_attempted
+    name = model or DEFAULT_SPACY_MODEL
+    if name == _spacy_model and _load_attempted:
+        return
+    _spacy_model = name
+    _nlp = spacy.load(name)
+    _load_attempted = True
+    _load_locks.clear()
 
 
-def get_nlp():
+async def ensure_nlp():
     global _nlp
-    if _nlp is None:
-        _nlp = spacy.load(_spacy_model or DEFAULT_SPACY_MODEL)
+    if _nlp is not None:
+        return _nlp
+    loop = asyncio.get_running_loop()
+    async with _load_locks.setdefault(loop, asyncio.Lock()):
+        if _nlp is None:
+            _nlp = await asyncio.to_thread(spacy.load, _spacy_model or DEFAULT_SPACY_MODEL)
     return _nlp
 
 
-def replace_random_noun_chunk(text, replacement="these walnuts"):
+async def replace_random_noun_chunk(text, replacement="these walnuts"):
     """Uses spacy to find all noun 'chunks' <text>. Then replaces a random noun chunk with the <replacement>. Returns result as string"""
-    doc = get_nlp()(text)
+    doc = (await ensure_nlp())(text)
     noun_chunks = list(doc.noun_chunks)
     if not noun_chunks:
         return None

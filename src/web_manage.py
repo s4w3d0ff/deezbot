@@ -54,6 +54,6 @@ class WebManageMixin:
             try:
                 await self.check_connections()
             except Exception as e:
-                logger.error("deez_loop Error:\n{e}")
+                logger.exception(f"deez_loop Error:\n{e}")
             await asyncio.sleep(self.loop_delay)
         logger.warning(f'deez_loop stopped')

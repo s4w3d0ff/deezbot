@@ -103,7 +103,7 @@ def test_channels_enriched(tmp_path):
         ]
 
     async def fake_get_streams(first=None, **kwargs):
-        return [{'id': '2000001', 'user_id': '2000001', 'viewer_count': 42, 'title': 'just deezing'}]
+        return [{'id': '999999', 'user_id': '2000001', 'viewer_count': 42, 'title': 'just deezing'}]
 
     bot.http.getUsers = fake_get_users
     bot.http.getStreams = fake_get_streams
@@ -123,6 +123,7 @@ def test_channels_enriched(tmp_path):
         off = by_id['2000002']
         assert off['is_live'] is False and off['viewers'] == 0 and off['title'] == ''
         assert body['channels'][0]['user_id'] == '2000001'
+        assert bot._chan_live_map.keys() == {'2000001'}
 
     run_test(bot, probe)
 
@@ -264,6 +265,110 @@ def test_commands_listing(tmp_path):
         assert body['total'] == len(body['commands'])
 
     run_test(bot, probe)
+
+
+def test_spacy_fallback_loads_once_concurrently(tmp_path, monkeypatch):
+    import time
+    import jokes as j
+
+    class FakeChunk:
+        start_char = 0
+        end_char = 3
+
+    class FakeDoc:
+        noun_chunks = [FakeChunk()]
+
+    class FakeNlp:
+        def __call__(self, text):
+            return FakeDoc()
+
+    calls = []
+
+    def fake_load(name):
+        calls.append(1)
+        time.sleep(0.05)
+        return FakeNlp()
+
+    monkeypatch.setattr(j.spacy, 'load', fake_load)
+    monkeypatch.setattr(j, '_nlp', None)
+    monkeypatch.setattr(j, '_spacy_model', 'testmodel')
+
+    async def main():
+        a = asyncio.create_task(j.replace_random_noun_chunk('the walnuts are here', 'deez'))
+        b = asyncio.create_task(j.replace_random_noun_chunk('some nouns around', 'deez'))
+        return await asyncio.gather(a, b)
+
+    out_a, out_b = asyncio.run(main())
+    j._load_locks.clear()
+    assert out_a == 'deez walnuts are here' and out_b == 'deeze nouns around'
+    assert len(calls) == 1
+
+
+def test_cmd_prefix_configured_and_default(tmp_path):
+    custom = deezbot.DeezBot(
+        cfg={'cmd_prefix': ['?'], 'scopes': [], 'channels': {'channel.chat.message': None}},
+        storage=SQLiteStorage(os.path.join(str(tmp_path), 'twitch.db')),
+    )
+    assert custom.cmd_prefix == ['?']
+    assert custom._prefix == ['?']
+
+    default = make_bot(str(tmp_path))
+    assert default.cmd_prefix == ['!', '~']
+    assert default._prefix == ['!', '~']
+
+
+def test_leave_gate_own_channel_only(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+    bot.http.user_id = '8000001'
+
+    user = {'user_id': '9000002', 'username': 'somechatter'}
+    own_channel = {'broadcaster_id': '8000001', 'broadcaster_user_name': 'botchan'}
+    foreign_channel = {'broadcaster_id': '7000003', 'broadcaster_user_name': 'otherchan'}
+
+    async def main():
+        await bot.storage.insert('channels', {'user_id': '9000002', 'jemote': 'GOTTEM'})
+        await bot.cmd_leave(user, foreign_channel, [])
+        assert sent == []
+        rows = (await bot.storage.query('channels'))[0]
+        assert str(rows['user_id']) == '9000002'
+        bot.cmd_leave._rate_limit_state.clear()
+
+        await bot.cmd_leave(user, own_channel, [])
+        assert sent and all(broadcaster == '8000001' for _, broadcaster in sent)
+        rows = [row for row in (await bot.storage.query('channels')) if str(row['user_id']) == '9000002']
+        assert rows == []
+
+    asyncio.run(main())
+
+
+def test_ignore_any_channel_no_arg(tmp_path):
+    bot = make_bot(str(tmp_path))
+    sent = []
+
+    async def fake_send(message, broadcaster_id=None):
+        sent.append((message, broadcaster_id or 'OWN'))
+        return [{'is_sent': True}]
+
+    bot.http.sendChatMessage = fake_send
+
+    user = {'user_id': '9000004', 'username': 'selfoptout'}
+    foreign_channel = {'broadcaster_id': '7000005', 'broadcaster_user_name': 'otherchan'}
+
+    async def main():
+        await bot.cmd_ignore(user, foreign_channel, [])
+        assert (await bot._get_ignore_status('9000004')) is True
+        assert sent and all(broadcaster == '7000005' for _, broadcaster in sent)
+        await bot.cmd_unignore(user, foreign_channel, [])
+        assert (await bot._get_ignore_status('9000004')) is False
+
+    asyncio.run(main())
 
 
 def test_logs_endpoint(tmp_path):
@@ -460,6 +565,54 @@ def test_chat_chunking_400_chars(tmp_path):
         assert all(len(c) <= 500 for c in chunks)
 
     run_test(bot, probe)
+
+
+def test_deez_loop_failure_logs_exception(tmp_path):
+    bot = make_bot(str(tmp_path))
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    cap_logger = logging.getLogger('web_manage')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+
+    async def boom():
+        raise RuntimeError('helix down for deezing')
+
+    bot.check_connections = boom
+
+    original_sleep = asyncio.sleep
+
+    async def fast_sleep(seconds):
+        await original_sleep(0.01)
+
+    try:
+        asyncio.sleep = fast_sleep
+
+        async def main():
+            task = asyncio.create_task(bot.deez_loop())
+            while not records:
+                await original_sleep(0.01)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(main())
+    finally:
+        asyncio.sleep = original_sleep
+        cap_logger.removeHandler(handler)
+
+    recs = [r for r in records if 'deez_loop Error' in r.getMessage()]
+    assert recs, 'no deez_loop error record captured'
+    msg = recs[0].getMessage()
+    assert 'helix down for deezing' in msg
+    assert '{e}' not in msg
+    assert recs[0].exc_info is not None
 
 
 def test_config_endpoint(tmp_path):

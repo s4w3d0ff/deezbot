@@ -132,7 +132,7 @@ class WebApiMixin:
             if key in message.lower():
                 emote = await self.get_jemote(self.http.user_id)
                 return self.app.response_json({"status": True, "reply": f"{joke}! {emote}", "matched_keyword": key})
-        r = replace_random_noun_chunk(message, "deez nutz")
+        r = await replace_random_noun_chunk(message, "deez nutz")
         if not r:
             return self.app.response_json({"status": True, "reply": None, "matched_keyword": None})
         emote = await self.get_jemote(self.http.user_id)
