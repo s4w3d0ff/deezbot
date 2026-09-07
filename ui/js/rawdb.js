@@ -1,4 +1,4 @@
-let rawState = { current: null, writable: false };
+let rawState = { current: null, writable: false, pkCol: null };
 
 async function loadRawTables() {
   let body;
@@ -16,6 +16,7 @@ async function loadRawTables() {
 async function selectRawTable(t) {
   rawState.current = t.name;
   rawState.writable = t.writable;
+  rawState.pkCol = null;
   $('#raw-title').textContent = `${t.name}${t.writable ? '' : ' (read-only)'}`;
   const nf = $('#new-row-form');
   nf.classList.add('hidden');
@@ -33,6 +34,7 @@ async function selectRawTable(t) {
         try { body = await api(`/api/db/table/${encodeURIComponent(rawState.current)}?limit=1`); } catch (_) {}
         const cols = collectCols(body && body.rows ? body.rows : []);
         if (!cols.length) return toast('table has no rows, add columns via chat commands first');
+        rawState.pkCol = cols[0];
         form.replaceChildren();
         for (const c of cols) {
           const label = el('label', c);
@@ -115,10 +117,21 @@ $('#new-row-form').addEventListener('submit', async e => {
   e.preventDefault();
   const data = {};
   for (const input of $$('#new-row-form input')) data[input.name] = input.value;
+  let overwrote = false;
+  if (rawState.pkCol) {
+    const pkVal = String(data[rawState.pkCol] ?? '').trim();
+    let body;
+    try { body = await api(`/api/db/table/${encodeURIComponent(rawState.current)}?limit=${uiOpt('page_size', 200)}`); } catch (_) {}
+    if (body && body.rows.some(r => String(r[rawState.pkCol] ?? '').trim() === pkVal)) {
+      overwrote = true;
+      if (!confirm(`row with ${rawState.pkCol}="${pkVal}" already exists. Submitting will overwrite that row. Continue?`)) return;
+    }
+  }
   try {
     await post(`/api/db/table/${encodeURIComponent(rawState.current)}`, data);
     $('#new-row-form').classList.add('hidden');
     loadRawRows();
     loadRawTables();
+    if (overwrote) toast('overwrote existing row');
   } catch (_) {}
 });
