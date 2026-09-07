@@ -703,6 +703,119 @@ def test_deez_loop_failure_logs_exception(tmp_path):
     assert recs[0].exc_info is not None
 
 
+def test_check_connections_connects_own_channel_when_unsubscribed(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('channels', {'user_id': '1000001', 'jemote': 'Kappa'}))
+    bot.http.user_id = '1000001'
+
+    async def fake_get_event_subs(status=None):
+        return {'data': []}
+
+    async def fake_get_streams(user_id=None, **kwargs):
+        return []
+
+    created = []
+
+    class FakeWs:
+        async def create_event_sub(self, event_type, user_id):
+            created.append((event_type, str(user_id)))
+
+    deleted = []
+
+    async def fake_delete(eventsub_id):
+        deleted.append(str(eventsub_id))
+        return {'id': eventsub_id}
+
+    bot.http.getEventSubs = fake_get_event_subs
+    bot.http.getStreams = fake_get_streams
+    bot.http.deleteEventSub = fake_delete
+    bot.ws = FakeWs()
+
+    asyncio.run(bot.check_connections())
+
+    assert created == [('channel.chat.message', '1000001')]
+    assert deleted == []
+
+
+def test_check_connections_disconnects_stale_eventsub_and_logs_failure(tmp_path):
+    bot = make_bot(str(tmp_path))
+    bot.http.user_id = '9000009'
+
+    stale = {'id': 'evt_9', 'condition': {'broadcaster_user_id': 3000001}}
+
+    async def fake_get_event_subs(status=None):
+        assert status == 'enabled'
+        return {'data': [stale]}
+
+    deleted = []
+
+    async def fake_delete(eventsub_id):
+        deleted.append(str(eventsub_id))
+        return None
+
+    class FakeWs:
+        async def create_event_sub(self, event_type, user_id):
+            pass
+
+    bot.http.getEventSubs = fake_get_event_subs
+    bot.http.deleteEventSub = fake_delete
+    bot.ws = FakeWs()
+
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    cap_logger = logging.getLogger('bot')
+    handler = Capture()
+    cap_logger.addHandler(handler)
+    try:
+        asyncio.run(bot.check_connections())
+    finally:
+        cap_logger.removeHandler(handler)
+
+    assert deleted == ['evt_9']
+    errs = [r for r in records if "Couldn't disconnect" in r.getMessage()]
+    assert errs, 'falsy deleteEventSub result must log the Could not disconnect error path'
+
+
+def test_connected_channels_coerces_eventsub_keys_to_strings(tmp_path):
+    bot = make_bot(str(tmp_path))
+
+    async def fake_get_event_subs(status=None):
+        return {'data': [{'id': 'evt_1', 'condition': {'broadcaster_user_id': 2000003}}]}
+
+    bot.http.getEventSubs = fake_get_event_subs
+
+    out = asyncio.run(bot.connected_channels())
+
+    assert set(out.keys()) == {'2000003'}, 'int broadcaster_user_id must be coerced to a string key'
+    assert out['2000003'] == {'id': 'evt_1', 'condition': {'broadcaster_user_id': 2000003}}
+
+
+def test_enrich_channels_live_map_keys_by_stream_user_id(tmp_path):
+    bot = make_bot(str(tmp_path))
+    asyncio.run(bot.storage.insert('channels', {'user_id': '5000001', 'jemote': 'Kappa'}))
+
+    async def fake_get_users(ids=None, logins=None):
+        return []
+
+    async def fake_get_streams(user_id=None, **kwargs):
+        assert user_id == ['5000001']
+        return [{'id': 'STREAM_ID', 'user_id': '5000001', 'viewer_count': 7, 'title': 't'}]
+
+    bot.http.getUsers = fake_get_users
+    bot.http.getStreams = fake_get_streams
+
+    out = asyncio.run(bot._enrich_channels())
+
+    entry = out['5000001']
+    assert entry['is_live'] is True, 'live stream row must key the live map by user_id, not stream id'
+    assert entry['viewers'] == 7
+    assert entry['title'] == 't'
+
+
 def test_origin_guard_cross_and_same_origin(tmp_path):
     bot = make_bot(str(tmp_path))
 
