@@ -17,4 +17,7 @@ if [ ! -x "$SCRIPT_DIR/deez_venv/bin/python3" ]; then
     exit 1
 fi
 
-exec -a deezbot "$SCRIPT_DIR/deez_venv/bin/python3" "$SCRIPT_DIR/src/bot.py"
+# argv[0] must stay an interpreter path: CPython >= 3.14 derives the venv from
+# argv[0], so renaming it (exec -a) makes the process run as system python and
+# lose deez_venv site-packages.
+exec "$SCRIPT_DIR/deez_venv/bin/python3" "$SCRIPT_DIR/src/bot.py"
