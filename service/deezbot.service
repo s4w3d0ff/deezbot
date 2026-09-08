@@ -1,16 +1,20 @@
+# deezbot systemd unit template. This file stays path-free in git: substitute
+# __DEEZBOT_ROOT__ (absolute path of this checkout) and __USER__ (unix account
+# that runs the bot), install to /etc/systemd/system/deezbot.service, then run
+# `systemctl daemon-reload` and enable.
 [Unit]
 Description=Twitch Deez Nutz Bot
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
-# caps restarts to 5 per minute on startup failure; deploy via sudo systemctl daemon-reload + re-enable (operator step, out of scope for this commit)
+# caps restarts to 5 per minute on startup failure
 StartLimitBurst=5
 
 [Service]
 Type=simple
-User=s4w3d0ff
-WorkingDirectory=/home/s4w3d0ff/Projects/deezbot
-ExecStart=/home/s4w3d0ff/Projects/deezbot/service/deezbot
+User=__USER__
+WorkingDirectory=__DEEZBOT_ROOT__
+ExecStart=__DEEZBOT_ROOT__/service/deezbot
 Restart=on-failure
 RestartSec=5
 

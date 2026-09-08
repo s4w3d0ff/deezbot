@@ -65,6 +65,7 @@ celerybeat.pid
 *.sage.py
 .env
 .venv
+deez_venv/
 env/
 venv/
 ENV/
