@@ -7,6 +7,8 @@ from jokes import replace_random_noun_chunk
 
 logger = logging.getLogger(__name__)
 
+TEST_CHAT_MAX_CHARS = 2000
+
 
 def jerr(data, status):
     return aweb.json_response(data, status=status)
@@ -161,14 +163,15 @@ class WebApiMixin:
         if not message:
             return jerr({"status": False, "error": "missing 'message'"}, 400)
         jokes = await self._get_jokes()
+        uid = self.http.user_id
         for key, joke in jokes.items():
             if key in message.lower():
-                emote = await self.get_jemote(self.http.user_id)
+                emote = await self.get_jemote(uid) if uid else self.default_jemote
                 return self.app.response_json({"status": True, "reply": f"{joke}! {emote}", "matched_keyword": key})
         r = await replace_random_noun_chunk(message, "deez nutz")
         if not r:
             return self.app.response_json({"status": True, "reply": None, "matched_keyword": None})
-        emote = await self.get_jemote(self.http.user_id)
+        emote = await self.get_jemote(uid) if uid else self.default_jemote
         return self.app.response_json({"status": True, "reply": f"{r} {emote}", "matched_keyword": None})
 
     @route('/api/test/chat', method='POST')
@@ -179,6 +182,8 @@ class WebApiMixin:
         message = (body.get('message') or '').strip()
         if not message:
             return jerr({"status": False, "error": "missing 'message'"}, 400)
+        if len(message) > TEST_CHAT_MAX_CHARS:
+            return jerr({"status": False, "error": f"message exceeds the {TEST_CHAT_MAX_CHARS} character limit"}, 400)
         out = ""
         sent_chunks = 0
         for word in message.split(" "):
