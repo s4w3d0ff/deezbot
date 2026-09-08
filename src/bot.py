@@ -45,7 +45,7 @@ class DeezBot(CommandsMixin, WebApiMixin, WebManageMixin, WebDbMixin, CommandBot
 
         configure_spacy(cfg.get('spacy_model'))
         self.default_jemote = cfg.get('default_jemote') or 'Kappa'
-        self.channel_cache_ttl = float((cfg.get('enrichment') or {}).get('channel_cache_ttl') or 60)
+        self.channel_cache_ttl = float((cfg.get('ui') or {}).get('channel_cache_ttl') or 60)
         self.db_write_tables = tuple(cfg.get('db_write_tables') or DEFAULT_WRITE_TABLES)
         self.ui_cfg = dict(cfg.get('ui') or {})
 
