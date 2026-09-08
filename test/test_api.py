@@ -1077,10 +1077,9 @@ def test_config_sections_from_yaml(tmp_path):
         'jlimit': 321,
         'loop_delay': 61,
         'default_jemote': 'Peekaboo',
-        'enrichment': {'channel_cache_ttl': 42},
         'web': {'host': '127.0.0.1', 'port': 5931, 'static_dirs': ['ui'], 'log_buffer_size': 55},
         'db_write_tables': ['joke'],
-        'ui': {'status_poll_ms': 1234, 'log_poll_ms': 777},
+        'ui': {'status_poll_ms': 1234, 'log_poll_ms': 777, 'channel_cache_ttl': 42},
     })
 
     assert bot.web_host == '127.0.0.1'

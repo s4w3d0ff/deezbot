@@ -21,9 +21,6 @@ web:
   static_dirs: [ui]       # directories served at /<dir>/... by the web server
   log_buffer_size: 1000   # in-process service log ring buffer capacity (lines)
 
-enrichment:
-  channel_cache_ttl: 60   # seconds to cache users/streams enrichment for channels + status
-
 spacy_model: en_core_web_sm
 
 db_write_tables: [joke, ignore, channels]   # tables writable via /api/db/table (rest read-only)
@@ -33,3 +30,4 @@ ui:
   log_poll_ms: 2000       # how often the Service Log fetches new lines
   page_size: 200          # rows per table view in the DB browser
   joke_list_limit: 500    # max keywords loaded into the Jokes editor
+  channel_cache_ttl: 60   # seconds to cache users/streams enrichment for channels + status
